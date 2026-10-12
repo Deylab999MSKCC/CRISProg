@@ -1,0 +1,81 @@
+# CRISProg configuration: every option with its default. Only data.h5ad and data.guide_col are required.
+# Paths are relative to this file. See README.md for what each step does.
+
+outdir: crisprog_results
+data:
+  h5ad: null
+  counts_layer: null
+  gene_col: null
+  guide_col: null
+  guide_sep: ;
+  controls: []
+  control_pattern: null
+  target_map: null
+  merge_identical_targets: true
+  keep_cells_without_guides: false
+programs:
+  file: null
+  min_genes: 20
+  discover:
+    h5ad: null
+    counts_layer: null
+    gene_col: null
+    methods:
+    - pca
+    - cnmf
+    max_cells: 20000
+    min_cells_frac: 0.005
+    n_hvg: 2000
+    n_pcs: 30
+    cnmf_k: 10
+    cnmf_n_iter: 50
+    cnmf_density_threshold: 0.5
+    n_neighbors: 30
+    n_genes: 1000
+    min_module_genes: 20
+    fdr: 0.05
+    jobs: 4
+    seed: 0
+covariates:
+  use:
+  - log_n_genes
+  - moi
+  batch: []
+  moi_col: null
+aucell:
+  rscript: Rscript
+  cores: 1
+  max_rank: null
+  rankings_cache: null
+association:
+  min_perturbed: 10
+  n_perm: 10000
+  perm_p: auto
+  pool_bins: 5
+  depth_bins: 10
+  fdr_scope: program
+  fdr: 0.05
+  seed: 1
+gene_test:
+  fdr: 0.05
+  n_null: 20
+  chunk: 2000
+  seed: 1
+enrichment:
+  backend: enrichr
+  libraries:
+  - GO_Biological_Process
+  - Reactome_Pathways
+  - KEGG
+  - WikiPathways_Human
+  - MSigDB_Hallmark
+  gmt: []
+  q: 0.05
+  min_overlap: 3
+  max_term_size: 500
+annotation:
+  backend: auto
+  context: ''
+  model: null
+  web_search: true
+  max_turns: 60

@@ -1,0 +1,9 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+example/data/
+example/results*/
+*.rds
+.DS_Store
+# unpublished study: screen-specific scripts, configs and results stay local
+validation/

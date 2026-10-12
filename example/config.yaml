@@ -1,0 +1,31 @@
+# CRISProg example run on the simulated screen (python example/make_example.py --outdir example/data).
+# Paths are relative to this file.
+outdir: results
+
+data:
+  h5ad: data/example.h5ad
+  counts_layer: counts
+  guide_col: guides
+  controls: [NTC_1, NTC_2, NTC_3, NTC_4, NTC_5, NTC_6]
+  target_map: data/guide_targets.tsv
+
+programs:
+  file: null                  # set to data/programs.gmt to use the true programs instead of discovering them
+  discover:
+    methods: [pca, cnmf]
+    cnmf_k: 5
+    cnmf_n_iter: 20
+    n_genes: 500
+
+covariates:
+  use: [log_n_genes, moi]
+  batch: [batch]
+
+association:
+  n_perm: 1000
+
+annotation:
+  context: >
+    Simulated high-MOI CRISPRi screen (6,000 cells, 2,000 genes, ~6 guides per cell). Two perturbations
+    have planted trans effects on gene programs; everything else is null. Genes are named G0001-G2000,
+    so there is no real biology to find.

@@ -1,0 +1,28 @@
+name: crisprog
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - python=3.11
+  - numpy
+  - scipy
+  - pandas
+  - anndata
+  - h5py
+  - matplotlib
+  - scanpy
+  - scikit-learn
+  - numba
+  - pyyaml
+  - requests
+  - pytest
+  - pip
+  - r-base>=4.3
+  - r-matrix
+  - bioconductor-aucell
+  - bioconductor-rhdf5
+  - bioconductor-biocparallel
+  - pip:
+      - hotspotsc
+      - cnmf
+      - anthropic
