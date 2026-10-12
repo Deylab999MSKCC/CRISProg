@@ -22,6 +22,8 @@ dependencies:
   - bioconductor-aucell
   - bioconductor-rhdf5
   - bioconductor-biocparallel
+  - r-domc                   # AUCell's parallel AUC computation
+  - r-dorng
   - pip:
       - hotspotsc
       - cnmf

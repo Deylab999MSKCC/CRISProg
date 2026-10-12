@@ -74,6 +74,11 @@ if (nzchar(opt$rankings) && file.exists(opt$rankings)) {
 rm(mat); invisible(gc())
 
 # ---- AUC ----
+# AUCell_calcAUC runs in parallel through doMC/doRNG; without them, use one core instead of failing
+if (cores > 1 && !all(vapply(c("doMC", "doRNG"), requireNamespace, logical(1), quietly = TRUE))) {
+  msg("R packages doMC/doRNG are not installed: computing AUC on 1 core (install r-domc and r-dorng to parallelize)")
+  cores <- 1
+}
 fc <- names(formals(AUCell_calcAUC))
 aargs <- list(geneSets = gene_sets, rankings = rankings, verbose = FALSE)
 if (nzchar(opt$max_rank)) {
