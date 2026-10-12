@@ -64,7 +64,7 @@ Each step reads the previous steps' outputs from `outdir`, so you can rerun any 
 
 **Discovering programs from the screen itself** is allowed but can be circular: a target's own knockdown creates structure, and the target can end up inside a module. The per-gene step catches this (see Flags). A separate discovery dataset avoids it.
 
-**AUCell tie-breaking.** AUCell ranks genes within each cell and breaks tied expression values at random. Normalized sparse data have many ties, so scores (and borderline hits) move slightly with the random draw. CRISProg makes this reproducible (`aucell.seed`, also passed to AUCell's parallel workers) and can average the AUC over several tie-breaking seeds (`aucell.n_repeats`, e.g. 5) to remove the dependence on a single draw, at the cost of one ranking per seed.
+**AUCell tie-breaking.** AUCell ranks genes within each cell and breaks tied expression values at random. Normalized sparse data have many ties, so scores (and borderline hits) move slightly with the random draw. CRISProg makes this reproducible (`aucell.seed`, also passed to AUCell's parallel workers) and can average the AUC over several tie-breaking seeds (`aucell.n_repeats`) to remove the dependence on a single draw, at the cost of one ranking per seed. In our tests on a large screen, t values from two seeds correlated at r ≈ 0.997, and associations near the FDR cutoff (FDR 0.03–0.08) were significant with some seeds but not others. **For final results, use `aucell.n_repeats: 5`** and treat associations that pass only with some seeds as borderline.
 
 **Association test.** OLS of each program's AUCell score on each perturbation, with covariates (default: log genes detected, MOI; add any obs column and `covariates.batch`). All fits are computed at once (Frisch–Waugh–Lovell). P-values come from stratified permutations: cells swap perturbation labels only within the same MOI × depth bin × batch stratum. With more than 50 units, the null is pooled over tests with similar perturbed-cell counts. FDR is Benjamini–Hochberg within each program. `3_association/calibration.tsv` shows the share of shuffled tests with OLS P < 0.05, which should be about 0.05.
 
@@ -96,7 +96,7 @@ The report covers:
 - testable hypotheses
 - verified references
 
-The instructions forbid invented references and require calibrated language. Still, check the references before using them.
+The output is checked for completeness (all required sections, a minimum length). A cut-off or incomplete reply is never saved as the report: the step retries (`annotation.retries`, default 2), keeps failed outputs as `failed_attempt_<n>.md`, and if every attempt fails it leaves the packet for a manual run. The instructions forbid invented references and require calibrated language. Still, check the references before using them.
 
 ## Outputs (main files)
 

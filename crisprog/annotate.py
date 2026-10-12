@@ -199,6 +199,17 @@ def _packet_md(pk):
 
 
 # --------------------------------------------------------------------------------------------- backends
+REQUIRED = ("## Overview", "## Programs", "## Regulators", "## References")
+
+
+def check_report(text):
+    """Problems that make an output unusable as the report (empty list = fine)."""
+    missing = [h for h in REQUIRED if h not in text]
+    words = len(text.split())
+    return ([f"missing sections: {', '.join(missing)}"] if missing else []) + \
+           ([f"only {words} words"] if words < 300 else [])
+
+
 def _claude_code(out, an):
     cmd = ["claude", "-p", "Read INSTRUCTIONS.md and packet.md in the current folder and follow the "
            "instructions. Reply with the report only.", "--output-format", "text",
@@ -206,11 +217,19 @@ def _claude_code(out, an):
            "--max-turns", str(an["max_turns"])]
     if an["model"]:
         cmd += ["--model", an["model"]]
-    log("running Claude Code headless (claude -p); this can take several minutes")
-    r = subprocess.run(cmd, cwd=out, capture_output=True, text=True, timeout=3600)
-    if r.returncode != 0 or not r.stdout.strip():
-        raise SystemExit(f"claude -p failed (exit {r.returncode}): {r.stderr.strip()[:500]}")
-    return r.stdout
+    tries = 1 + max(0, int(an["retries"]))
+    for i in range(1, tries + 1):
+        log(f"running Claude Code headless (claude -p), attempt {i}/{tries}; this can take several minutes")
+        r = subprocess.run(cmd, cwd=out, capture_output=True, text=True, timeout=3600)
+        text = r.stdout.strip()
+        problems = ([f"exit code {r.returncode}: {r.stderr.strip()[:300]}"] if r.returncode != 0 else []) \
+            + check_report(text)
+        if not problems:
+            return text
+        with open(os.path.join(out, f"failed_attempt_{i}.md"), "w") as fh:
+            fh.write(text + "\n")
+        log(f"attempt {i} unusable ({'; '.join(problems)}); output kept in failed_attempt_{i}.md")
+    raise SystemExit(f"no usable report after {tries} attempts")
 
 
 def _api(out, an, packet_md):
@@ -242,6 +261,11 @@ def _api(out, an, packet_md):
                 if url:
                     sources[url] = getattr(c, "title", "") or url
     report = "".join(text)
+    problems = check_report(report)
+    if problems:
+        with open(os.path.join(out, "failed_attempt_api.md"), "w") as fh:
+            fh.write(report + "\n")
+        raise SystemExit(f"API output unusable ({'; '.join(problems)}); kept in failed_attempt_api.md")
     if sources:
         report += "\n\n### Web sources consulted\n" + "\n".join(f"- [{t}]({u})" for u, t in sources.items())
     return report

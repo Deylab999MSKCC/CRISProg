@@ -82,3 +82,4 @@ annotation:
   model: null
   web_search: true
   max_turns: 60
+  retries: 2

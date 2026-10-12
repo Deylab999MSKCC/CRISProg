@@ -130,3 +130,24 @@ def test_discovery_recovers_planted_programs(tmp_path, example_data):
         t = {f"G{i:04d}" for i in idx}
         best = max(len(t & set(g.gene)) / len(t | set(g.gene)) for _, g in P.groupby("program"))
         assert best > 0.8, (name, best)
+
+
+def test_annotation_retries_incomplete_report(tmp_path, example_data, monkeypatch):
+    """A cut-off Claude Code reply is not saved as the report; the step retries and keeps the failed output."""
+    from crisprog import cli
+    fake = tmp_path / "bin"
+    fake.mkdir()
+    good = "\n\n".join(f"## {h}\n" + "word " * 100 for h in ("Overview", "Programs", "Regulators", "References"))
+    (tmp_path / "good.md").write_text(good)
+    script = fake / "claude"
+    script.write_text(f"""#!/bin/sh
+n=$(cat {tmp_path}/count 2>/dev/null || echo 0); n=$((n+1)); echo $n > {tmp_path}/count
+if [ $n -eq 1 ]; then echo "I couldn't finish the report: my last reply was stopped partway through."; else cat {tmp_path}/good.md; fi
+""")
+    script.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{fake}:{os.environ['PATH']}")
+    cfgp = _config(tmp_path, example_data, file=str(example_data / "programs.gmt"))
+    cli.main(["annotate", cfgp])
+    ann = tmp_path / "out" / "6_annotation"
+    assert (ann / "report.md").read_text().strip() == good.strip()
+    assert "stopped partway" in (ann / "failed_attempt_1.md").read_text()

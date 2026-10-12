@@ -58,7 +58,8 @@ DEFAULTS = {
                    "q": 0.05, "min_overlap": 3, "max_term_size": 500},
     "annotation": {"backend": "claude-code",   # claude-code (default; packet if the CLI is missing) | api | packet
                    "context": "",          # what the experiment is: cells, perturbation, question
-                   "model": None, "web_search": True, "max_turns": 60},
+                   "model": None, "web_search": True, "max_turns": 60,
+                   "retries": 2},              # extra attempts if the report comes back cut off or incomplete
 }
 
 PATH_KEYS = [("data", "h5ad"), ("data", "target_map"), ("programs", "file"), ("programs", "background"),
