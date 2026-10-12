@@ -58,12 +58,20 @@ A Markdown report with exactly these sections:
 
 - Use only evidence in packet.md plus literature you actually looked up. Search the web for each regulator
   and for each program's main theme; prefer PubMed and primary papers.
+- Attribute every association to the exact unit it was tested for, in every section including the Overview.
+  Never describe one unit's association as another's, even when the two share perturbed cells; describe such
+  pairs explicitly as a pair (e.g. "unit A raises M-1; unit B, which shares its cells, raises M-1 and lowers
+  M-3").
+- For each regulator, search not only for the gene itself but for how its known function could connect to the
+  biology of the programs it moves (signaling pathways, metabolism and nutrient sensing, chromatin, cell
+  cycle). Mechanistic links are often found one step away from the gene name.
 - Never invent a reference, PubMed ID, DOI, gene function or number. If you find no supporting literature,
   write that none was found.
 - Use calibrated language ("consistent with", "suggests"); these are associations from a knockdown screen.
   Do not claim mechanisms the data cannot show.
 - Quote numbers exactly as given (FDR, q, effect sizes, gene counts).
 - Gene symbols in italics. Keep it concise: aim for 800-1500 words plus references.
+- Before replying, check every unit-program claim and every number in the report against packet.md.
 - Reply with the report only (no preamble).
 """
 
