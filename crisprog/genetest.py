@@ -14,7 +14,8 @@ concentrated in that program:
 
 Outputs (gene-test step folder):
   gene_results.tsv.gz    unit, gene, beta, t, p, fdr, is_target, programs
-  program_summary.tsv    one row per significant unit x program association (counts, ratio, direction agreement)
+  program_summary.tsv    one row per significant unit x program association (counts, ratio, direction agreement,
+                         t of the unit's own and shared-CRE targets, units it shares a CRE with)
   overlap.tsv            per program, pairs of its regulators: overlap of changed genes (Jaccard) and of
                          perturbed cells (shared guides/CREs make two units hard to tell apart)
   heatmap_<program>.png/.pdf
@@ -96,11 +97,14 @@ def run_gene_test(cfg, A, out):
             member.setdefault(x, []).append(p)
     targets = {u: set(t.split(";")) if isinstance(t, str) and t else set()
                for u, t in zip(uidx.unit, uidx.targets.fillna(""))}
+    own = {u: [x for x in str(t).split(";") if x] for u, t in zip(uidx.unit, uidx.targets.fillna(""))}
     if A.target_map is not None:               # cis set: all genes the unit's guides target (shared CREs too)
         g2t = A.target_map.groupby("guide").target.apply(set).to_dict()
         for u, gl in zip(uidx.unit, uidx.guides.fillna("")):
             for gd in str(gl).split(";"):
                 targets[u] |= g2t.get(gd, set())
+    unit_of = {x: u for u, xs in own.items() for x in xs}
+    partners = {u: sorted({unit_of[x] for x in targets[u] - set(own[u]) if x in unit_of} - {u}) for u in own}
 
     long = pd.DataFrame({
         "unit": np.repeat(units_sig, len(genes)), "gene": np.tile(genes, len(units_sig)),
@@ -128,13 +132,14 @@ def run_gene_test(cfg, A, out):
             k_all, k_prog = int(sig.sum()), int((sig & inprog).sum())
             up = int((sig & inprog & (T[i] > 0)).sum())
             same = int((sig & inprog & (np.sign(T[i]) == np.sign(h.t))).sum())
-            tt = {x: float(T[i][gi[x]]) for x in targets[h.unit] if x in gi}
+            tt = {x: float(T[i][gi[x]]) for x in own[h.unit] + sorted(targets[h.unit] - set(own[h.unit])) if x in gi}
             rows_s.append(dict(program=p, unit=h.unit, program_effect_sd=h.effect_sd, program_fdr=h.fdr,
                                target_in_program=h.target_in_program, program_genes_tested=n_prog,
                                changed_in_program=k_prog, up=up, down=k_prog - up,
                                same_direction_as_program=same, changed_all_genes=k_all, genes_tested=n_all,
                                ratio=(k_prog / n_prog) / (k_all / n_all) if k_all and n_prog else np.nan,
                                target_t=";".join(f"{x}:{v:.1f}" for x, v in tt.items()),
+                               shares_cre_with=";".join(partners[h.unit]),
                                flag=("self-driven? target is in the program and no other program gene changed"
                                      if h.target_in_program is True and k_prog == 0 else "")))
             changed[h.unit] = set(genes[sig & inprog])
@@ -146,7 +151,7 @@ def run_gene_test(cfg, A, out):
                 ov_rows.append(dict(program=p, unit_a=us[x], unit_b=us[y],
                                     genes_jaccard=len(a_ & b_) / len(a_ | b_) if a_ | b_ else np.nan,
                                     cells_overlap=len(ca & cb) / max(1, min(len(ca), len(cb)))))
-        _heatmap(p, H, units_sig, genes, F, T, targets, gl, fcut, out, Pv)
+        _heatmap(p, H, units_sig, genes, F, T, targets, gl, fcut, out, Pv, own, partners)
     summ = pd.DataFrame(rows_s)
     summ.to_csv(os.path.join(out, "program_summary.tsv"), sep="\t", index=False, float_format="%.4g")
     ov = pd.DataFrame(ov_rows, columns=["program", "unit_a", "unit_b", "genes_jaccard", "cells_overlap"])
@@ -160,7 +165,8 @@ def run_gene_test(cfg, A, out):
             + "; ".join(f"{r.unit_a} & {r.unit_b} ({r.cells_overlap:.0%})" for r in shared.itertuples()))
 
 
-def _heatmap(p, H, units_sig, genes, F, T, targets, prog_genes, fcut, out, Pv, cap=5, cap_own=10):
+def _heatmap(p, H, units_sig, genes, F, T, targets, prog_genes, fcut, out, Pv, own, partners, cap=5, cap_own=10):
+    """targets = cis set (excluded from the heatmap); own = the unit's own targets, shown in the left column."""
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
@@ -186,7 +192,7 @@ def _heatmap(p, H, units_sig, genes, F, T, targets, prog_genes, fcut, out, Pv, c
     own_txt, own_v = [], []
     for u in regs:
         i = units_sig.index(u)
-        tg = [x for x in targets[u] if x in gi]
+        tg = [x for x in own[u] if x in gi]                   # the unit's own target(s), in name order
         if not tg:
             own_txt.append("–"); own_v.append(0.0); continue
         tv = [(T[i, gi[x]], Pv[i, gi[x]]) for x in tg]
@@ -206,11 +212,14 @@ def _heatmap(p, H, units_sig, genes, F, T, targets, prog_genes, fcut, out, Pv, c
         axo.text(0.5, i + 0.5, txt, ha="center", va="center", fontsize=4.5,
                  color="white" if abs(own_v[i]) > 6 else "black")
     axo.set_xlim(0, 1); axo.set_ylim(n, 0)
-    axo.set_xticks([0.5]); axo.set_xticklabels(["target\n(t; P<0.05)"], fontsize=5)
+    axo.set_xticks([0.5]); axo.set_xticklabels(["own target\n(t; P<0.05)"], fontsize=5)
     axo.set_yticks(np.arange(n) + 0.5)
     tip = dict(zip(H.unit, H.target_in_program))
-    axo.set_yticklabels([u + ("\n(in program)" if tip.get(u) is True else "") for u in regs], fontsize=5.5,
-                        linespacing=0.9)
+    def label(u):
+        notes = (["in program"] if tip.get(u) is True else []) + \
+                ([f"shared CRE with {', '.join(partners[u])}"] if partners.get(u) else [])
+        return u + (f"\n({'; '.join(notes)})" if notes else "")
+    axo.set_yticklabels([label(u) for u in regs], fontsize=5.5, linespacing=0.9)
     im = ax.pcolormesh(np.arange(M.shape[1] + 1), np.arange(n + 1), M, norm=TwoSlopeNorm(0, -cap, cap), **kw)
     ax.set_xlim(0, M.shape[1]); ax.set_ylim(n, 0)
     for i in range(1, n):
