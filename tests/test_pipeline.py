@@ -74,10 +74,11 @@ needs_r = pytest.mark.skipif(
 
 def _config(tmp_path, data, **programs):
     import yaml
-    cfg = {"outdir": str(tmp_path / "out"),
+    cfg = {"name": "out", "results_dir": str(tmp_path),
            "data": {"h5ad": str(data / "example.h5ad"), "counts_layer": "counts", "guide_col": "guides",
                     "controls": [f"NTC_{k}" for k in range(1, 7)], "target_map": str(data / "guide_targets.tsv")},
            "programs": programs, "covariates": {"batch": ["batch"]}, "association": {"n_perm": 500},
+           "aucell": {"n_repeats": 2},
            "enrichment": {"backend": "gmt", "gmt": []}}
     p = tmp_path / "config.yaml"
     p.write_text(yaml.safe_dump(cfg))

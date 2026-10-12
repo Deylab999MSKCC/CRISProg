@@ -1,12 +1,18 @@
 """Run configuration: a YAML file merged over these defaults. Relative paths are resolved against the
-directory of the config file."""
+directory of the config file.
+
+Results go to <results_dir>/<name>/ (default <repo>/results/<name>/); name defaults to the h5ad file name."""
 import copy
 import os
+import re
 
 import yaml
 
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
 DEFAULTS = {
-    "outdir": "crisprog_results",
+    "name": None,                          # dataset / run name: results go to <results_dir>/<name>/ (default: h5ad name)
+    "results_dir": None,                   # default: <repo>/results
     "data": {
         "h5ad": None,                      # analysis data: .X normalized expression, raw counts layer, guide column
         "counts_layer": None,
@@ -47,7 +53,7 @@ DEFAULTS = {
     "covariates": {"use": ["log_n_genes", "moi"], "batch": [], "moi_col": None},
     "aucell": {"rscript": "Rscript", "cores": 1, "max_rank": None, "rankings_cache": None,
                "seed": None,                # tie-breaking seed (default: association.seed)
-               "n_repeats": 1},             # average the AUC over this many tie-breaking seeds
+               "n_repeats": 5},             # average the AUC over this many tie-breaking seeds (1 = fastest)
     "association": {"min_perturbed": 10, "n_perm": 10000, "perm_p": "auto", "pool_bins": 5, "depth_bins": 10,
                     "fdr_scope": "program", "fdr": 0.05, "seed": 1},
     "gene_test": {"fdr": 0.05, "n_null": 20, "chunk": 2000, "seed": 1},
@@ -79,6 +85,9 @@ def _merge(base, over):
 def load(path):
     with open(path) as fh:
         user = yaml.safe_load(fh) or {}
+    if "outdir" in user:
+        raise SystemExit("config: 'outdir' was replaced by 'name' (and optional 'results_dir'); results now go to "
+                         "<results_dir>/<name>/, by default <repo>/results/<name>/")
     cfg = _merge(DEFAULTS, user)
     root = os.path.dirname(os.path.abspath(path))
 
@@ -91,10 +100,15 @@ def load(path):
             d = d[k]
         d[keys[-1]] = resolve(d[keys[-1]])
     cfg["enrichment"]["gmt"] = [resolve(p) for p in cfg["enrichment"]["gmt"]]
-    cfg["outdir"] = resolve(cfg["outdir"])
     for k in ("h5ad", "guide_col"):
         if not cfg["data"][k]:
             raise SystemExit(f"config: data.{k} is required")
+    name = cfg["name"] or os.path.basename(cfg["data"]["h5ad"]).rsplit(".h5ad", 1)[0]
+    if not re.fullmatch(r"[A-Za-z0-9._-]+", str(name)):
+        raise SystemExit(f"config: name '{name}' may only contain letters, digits, '.', '_' and '-'")
+    cfg["name"] = name
+    cfg["results_dir"] = resolve(cfg["results_dir"]) if cfg["results_dir"] else os.path.join(REPO, "results")
+    cfg["outdir"] = os.path.join(cfg["results_dir"], name)            # used internally by every step
     disc = cfg["programs"]["discover"]
     for k, src in (("h5ad", "h5ad"), ("counts_layer", "counts_layer"), ("gene_col", "gene_col")):
         if disc[k] is None:

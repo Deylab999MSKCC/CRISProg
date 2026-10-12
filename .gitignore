@@ -7,3 +7,5 @@ example/results*/
 .DS_Store
 # unpublished study: screen-specific scripts, configs and results stay local
 validation/
+results/
+data/

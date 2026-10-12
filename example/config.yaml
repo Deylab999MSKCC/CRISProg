@@ -1,16 +1,16 @@
-# CRISProg example run on the simulated screen (python example/make_example.py --outdir example/data).
+# CRISProg example run on the simulated screen (python example/make_example.py writes it to data/example/).
 # Paths are relative to this file.
-outdir: results
+name: example                 # results go to <repo>/results/example/
 
 data:
-  h5ad: data/example.h5ad
+  h5ad: ../data/example/example.h5ad
   counts_layer: counts
   guide_col: guides
   controls: [NTC_1, NTC_2, NTC_3, NTC_4, NTC_5, NTC_6]
-  target_map: data/guide_targets.tsv
+  target_map: ../data/example/guide_targets.tsv
 
 programs:
-  file: null                  # set to data/programs.gmt to use the true programs instead of discovering them
+  file: null                  # set to ../data/example/programs.gmt to use the true programs instead of discovering them
   discover:
     methods: [pca, cnmf]
     cnmf_k: 5

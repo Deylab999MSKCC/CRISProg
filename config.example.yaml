@@ -1,7 +1,9 @@
 # CRISProg configuration: every option with its default. Only data.h5ad and data.guide_col are required.
-# Paths are relative to this file. See README.md for what each step does.
+# Paths are relative to this file. Results go to <results_dir>/<name>/ (default: results/<h5ad name>/ in the repo).
+# See README.md for what each step does.
 
-outdir: crisprog_results
+name: null
+results_dir: null
 data:
   h5ad: null
   counts_layer: null
@@ -49,7 +51,7 @@ aucell:
   max_rank: null
   rankings_cache: null
   seed: null
-  n_repeats: 1
+  n_repeats: 5
 association:
   min_perturbed: 10
   n_perm: 10000

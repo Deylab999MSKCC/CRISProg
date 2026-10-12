@@ -26,11 +26,11 @@ You can also use an existing setup: Python ≥ 3.10 with `numpy scipy pandas ann
 ## Quick start (simulated screen)
 
 ```bash
-python example/make_example.py --outdir example/data
-python crisprog.py run example/config.yaml
+python example/make_example.py              # writes the simulated screen to data/example/
+python crisprog.py run example/config.yaml  # results in results/example/
 ```
 
-The simulation has three co-expressed programs (PROG_A–C) and two planted regulators: *G0005* raises PROG_A and *G0900* lowers PROG_B. Discovery recovers the three programs from both embeddings, and the association test finds both regulators. The per-gene step also flags two null targets (*G1019*, *G1105*) whose "effect" on an extra module is only their own knockdown. Program discovery takes most of the time (cNMF); set `programs.file: data/programs.gmt` in the config to skip it.
+The simulation has three co-expressed programs (PROG_A–C) and two planted regulators: *G0005* raises PROG_A and *G0900* lowers PROG_B. Discovery recovers the three programs from both embeddings, and the association test finds both regulators. The per-gene step also flags two null targets (*G1019*, *G1105*) whose "effect" on an extra module is only their own knockdown. Program discovery takes most of the time (cNMF); set `programs.file: ../data/example/programs.gmt` in the config to skip it.
 
 ## Running
 
@@ -42,7 +42,7 @@ python crisprog.py run config.yaml --from test     # resume from a step
 python crisprog.py genes config.yaml               # one step
 ```
 
-Each step reads the previous steps' outputs from `outdir`, so you can rerun any step with new settings.
+**Where things go.** Each run has a `name` (default: the h5ad file name). Results go to `results/<name>/` in the repo (or `<results_dir>/<name>/` if you set `results_dir`), with one folder per step plus `config_used.yaml` and `crisprog.log`. Keeping a dataset's inputs in `data/<name>/` keeps things together; `results/` and `data/` are not tracked by git. Each step reads the previous steps' outputs from `results/<name>/`, so you can rerun any step with new settings; use a new `name` to keep variants side by side (e.g. `myscreen_custom_background`).
 
 ## Inputs
 

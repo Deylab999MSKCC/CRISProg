@@ -27,7 +27,8 @@ import scipy.sparse as sp
 
 def main(argv=None):
     ap = argparse.ArgumentParser()
-    ap.add_argument("--outdir", default=os.path.dirname(os.path.abspath(__file__)))
+    ap.add_argument("--outdir", default=os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                                                     "data", "example"))
     ap.add_argument("--n-cells", type=int, default=6000)
     ap.add_argument("--seed", type=int, default=0)
     a = ap.parse_args(argv)

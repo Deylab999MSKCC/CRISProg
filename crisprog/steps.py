@@ -1,4 +1,4 @@
-"""Pipeline steps. Each takes the config and a shared Context; outputs go to <outdir>/<step folder>/."""
+"""Pipeline steps. Each takes the config and a shared Context; outputs go to results/<name>/<step folder>/."""
 import json
 import os
 import time
