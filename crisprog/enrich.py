@@ -1,8 +1,8 @@
 """Pathway enrichment of the programs and of each regulator's changed program genes.
 
 Gene lists and backgrounds:
-  programs    each program's genes vs the genes programs were discovered from (or, for given programs, all
-              genes measured in data.h5ad)
+  programs    each program's genes vs programs.background if given, else the genes programs were discovered
+              from, else (given programs) all genes measured in data.h5ad
   regulators  for each significant unit x program association: the program genes the unit changed in the
               per-gene test (FDR < gene_test.fdr, own targets excluded) vs all measured genes of that program
 
@@ -37,7 +37,10 @@ def gene_lists(cfg):
     from .data import read_programs
     progs = read_programs(programs_path(cfg))
     bgf = os.path.join(cfg["outdir"], DIRS["programs"], "background_genes.txt")
-    if not cfg["programs"]["file"] and os.path.exists(bgf):
+    if cfg["programs"]["background"]:                       # user-given background, e.g. genes the programs came from
+        bg = [ln.split("\t")[0].strip() for ln in open(cfg["programs"]["background"]) if ln.strip()]
+        log(f"program enrichment background: {len(bg):,} genes from {cfg['programs']['background']}")
+    elif not cfg["programs"]["file"] and os.path.exists(bgf):
         bg = [x.strip() for x in open(bgf) if x.strip()]
     else:
         import anndata

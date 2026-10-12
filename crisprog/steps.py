@@ -69,8 +69,9 @@ def step_score(cfg, ctx):
     scored, recovery = program_recovery(programs, A.genes, cfg["programs"]["min_genes"])
     recovery.to_csv(os.path.join(out, "program_genes.tsv"), sep="\t", index=False)
     au = cfg["aucell"]
+    seed = au["seed"] if au["seed"] is not None else cfg["association"]["seed"]
     S = run_aucell(A.X, A.genes, A.cells, scored, out, au["rscript"], au["cores"], au["max_rank"],
-                   cfg["association"]["seed"], au["rankings_cache"])
+                   seed, au["rankings_cache"], repeats=au["n_repeats"])
     rank_program_genes(A, S, scored, out, cfg["association"]["seed"])
 
 

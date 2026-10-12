@@ -54,6 +54,7 @@ Each step reads the previous steps' outputs from `outdir`, so you can rerun any 
 | Control guides | `data.controls`, `data.control_pattern` | Labels and/or a regex. Controls are not tested and don't count towards MOI |
 | Guide → target | `data.target_map` | Optional TSV with columns `guide`, `target`. Without it every guide is tested on its own; with it, guides are grouped by target, and targets with identical guides are tested once (`A/B`) |
 | Programs | `programs.file` | Optional `.gmt` or TSV (`program`, `gene`). Without it, programs are discovered |
+| Enrichment background | `programs.background` | Optional gene list (one per line) for enriching given programs, e.g. the genes the programs were built from. Default: all measured genes |
 | Discovery data | `programs.discover.h5ad` | Optional separate h5ad to discover programs from (same format; e.g. a time course). Default: the analysis data |
 | Context | `annotation.context` | A few sentences on the experiment for the AI step: cell type, perturbation type, the question |
 
@@ -62,6 +63,8 @@ Each step reads the previous steps' outputs from `outdir`, so you can rerun any 
 **Program discovery.** For each embedding, Hotspot builds a cell kNN graph and finds genes whose expression is locally autocorrelated on it. It then groups the top autocorrelated genes into modules by their pairwise local correlations. Each module is a program: a discrete gene set, which is what AUCell needs. cNMF is used only as an embedding (its per-cell usages). Its continuous gene weights are not used as programs, because there is no natural cutoff for membership and the default TPM-scale weights mostly track expression level.
 
 **Discovering programs from the screen itself** is allowed but can be circular: a target's own knockdown creates structure, and the target can end up inside a module. The per-gene step catches this (see Flags). A separate discovery dataset avoids it.
+
+**AUCell tie-breaking.** AUCell ranks genes within each cell and breaks tied expression values at random. Normalized sparse data have many ties, so scores (and borderline hits) move slightly with the random draw. CRISProg makes this reproducible (`aucell.seed`, also passed to AUCell's parallel workers) and can average the AUC over several tie-breaking seeds (`aucell.n_repeats`, e.g. 5) to remove the dependence on a single draw, at the cost of one ranking per seed.
 
 **Association test.** OLS of each program's AUCell score on each perturbation, with covariates (default: log genes detected, MOI; add any obs column and `covariates.batch`). All fits are computed at once (Frisch–Waugh–Lovell). P-values come from stratified permutations: cells swap perturbation labels only within the same MOI × depth bin × batch stratum. With more than 50 units, the null is pooled over tests with similar perturbed-cell counts. FDR is Benjamini–Hochberg within each program. `3_association/calibration.tsv` shows the share of shuffled tests with OLS P < 0.05, which should be about 0.05.
 
@@ -74,7 +77,7 @@ Each step reads the previous steps' outputs from `outdir`, so you can rerun any 
 - `self-driven?`: the target is a program gene and no other program gene changed. The program effect may be just the target's own knockdown.
 - `cells_overlap` in `overlap.tsv`: the share of perturbed cells two regulators share. High overlap (e.g. a CRE linked to two genes) means the two effects cannot be separated.
 
-**Enrichment.** Programs are tested against the discovery genes (or all measured genes). Each regulator's changed program genes are tested against the program's measured genes. The Enrichr backend uses Enrichr's background-aware API with the newest version of each library family (`enrichment.libraries`). If Enrichr is unreachable and `enrichment.gmt` files are given, a local hypergeometric test is used instead. Terms are kept at q < 0.05 with at least 3 overlapping genes.
+**Enrichment.** Programs are tested against `programs.background` if given, else the discovery genes, else all measured genes. Each regulator's changed program genes are tested against the program's measured genes. The Enrichr backend uses Enrichr's background-aware API with the newest version of each library family (`enrichment.libraries`). If Enrichr is unreachable and `enrichment.gmt` files are given, a local hypergeometric test is used instead. Terms are kept at q < 0.05 with at least 3 overlapping genes.
 
 **AI annotation.** The step writes `INSTRUCTIONS.md` and `packet.md`, with all results in compact form, then runs one backend:
 

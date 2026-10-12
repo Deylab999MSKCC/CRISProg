@@ -29,11 +29,14 @@ parse_args <- function(defaults) {
   defaults
 }
 
-opt <- parse_args(list(input = "", out = "", cores = "1", max_rank = "", seed = "1", rankings = ""))
+opt <- parse_args(list(input = "", out = "", cores = "1", max_rank = "", seed = "1", rankings = "", repeats = "1"))
 if (!nzchar(opt$input) || !nzchar(opt$out)) stop("--input and --out are required")
 cores <- as.integer(opt$cores)
 msg <- function(...) cat(format(Sys.time(), "[%H:%M:%S] "), "[R] ", ..., "\n", sep = "")
-set.seed(as.integer(opt$seed))   # AUCell breaks ties in the cell rankings at random
+seed0 <- as.integer(opt$seed)
+repeats <- max(1L, as.integer(opt$repeats))
+# AUCell breaks tied expression values at random when ranking genes in each cell. Each repeat uses its own seed
+# (seed, seed+1, ...), passed to the parallel workers too; the AUC is averaged over repeats.
 
 # ---- expression (genes x cells) ----
 h5 <- file.path(opt$input, "matrix.h5")
@@ -50,47 +53,63 @@ prog <- read.delim(file.path(opt$input, "programs.tsv"), header = TRUE, stringsA
 gene_sets <- lapply(split(prog$gene, prog$program), unique)
 msg("programs: ", length(gene_sets))
 
-# ---- rankings (independent of the programs; optionally cached) ----
-if (nzchar(opt$rankings) && file.exists(opt$rankings)) {
-  msg("loading cached rankings <- ", opt$rankings)
-  rankings <- readRDS(opt$rankings)
-  if (!identical(colnames(rankings), colnames(mat)) || !identical(rownames(rankings), rownames(mat)))
-    stop("cached rankings do not match these cells/genes; delete ", opt$rankings, " to rebuild")
-} else {
-  msg("building cell rankings")
+rank_cells <- function(seed, cache) {
+  if (nzchar(cache) && file.exists(cache)) {
+    msg("loading cached rankings <- ", cache)
+    rk <- readRDS(cache)
+    if (!identical(colnames(rk), colnames(mat)) || !identical(rownames(rk), rownames(mat)))
+      stop("cached rankings do not match these cells/genes; delete ", cache, " to rebuild")
+    return(rk)
+  }
+  msg("building cell rankings (seed ", seed, ")")
+  set.seed(seed)
   # argument names differ across AUCell versions: use whatever this installation accepts
   fb <- names(formals(AUCell_buildRankings))
   bargs <- list(exprMat = mat, plotStats = FALSE, verbose = FALSE)
-  if ("BPPARAM" %in% fb) bargs$BPPARAM <- BiocParallel::MulticoreParam(cores)
+  if ("BPPARAM" %in% fb) bargs$BPPARAM <- BiocParallel::MulticoreParam(cores, RNGseed = seed)
   else if ("nCores" %in% fb) bargs$nCores <- cores
   if ("splitByBlocks" %in% fb) bargs$splitByBlocks <- TRUE   # lower peak memory
-  rankings <- do.call(AUCell_buildRankings, bargs)
-  if (nzchar(opt$rankings)) {
-    dir.create(dirname(opt$rankings), recursive = TRUE, showWarnings = FALSE)
-    saveRDS(rankings, opt$rankings, compress = FALSE)
-    msg("cached rankings -> ", opt$rankings)
+  rk <- do.call(AUCell_buildRankings, bargs)
+  if (nzchar(cache)) {
+    dir.create(dirname(cache), recursive = TRUE, showWarnings = FALSE)
+    saveRDS(rk, cache, compress = FALSE)
+    msg("cached rankings -> ", cache)
   }
+  rk
 }
-rm(mat); invisible(gc())
 
-# ---- AUC ----
 # AUCell_calcAUC runs in parallel through doMC/doRNG; without them, use one core instead of failing
 if (cores > 1 && !all(vapply(c("doMC", "doRNG"), requireNamespace, logical(1), quietly = TRUE))) {
   msg("R packages doMC/doRNG are not installed: computing AUC on 1 core (install r-domc and r-dorng to parallelize)")
-  cores <- 1
+  calc_cores <- 1
+} else {
+  calc_cores <- cores
 }
-fc <- names(formals(AUCell_calcAUC))
-aargs <- list(geneSets = gene_sets, rankings = rankings, verbose = FALSE)
-if (nzchar(opt$max_rank)) {
-  mr <- as.numeric(opt$max_rank)
-  aargs$aucMaxRank <- if (mr < 1) ceiling(mr * nrow(rankings)) else as.integer(mr)
+
+auc <- NULL
+for (r in seq_len(repeats)) {
+  seed <- seed0 + r - 1L
+  cache <- if (!nzchar(opt$rankings)) "" else if (repeats == 1) opt$rankings else
+    sub("(\\.rds)?$", paste0("_seed", seed, ".rds"), opt$rankings)
+  rankings <- rank_cells(seed, cache)
+  fc <- names(formals(AUCell_calcAUC))
+  aargs <- list(geneSets = gene_sets, rankings = rankings, verbose = FALSE)
+  if (nzchar(opt$max_rank)) {
+    mr <- as.numeric(opt$max_rank)
+    aargs$aucMaxRank <- if (mr < 1) ceiling(mr * nrow(rankings)) else as.integer(mr)
+  }
+  if ("nCores" %in% fc) aargs$nCores <- calc_cores else if ("BPPARAM" %in% fc)
+    aargs$BPPARAM <- BiocParallel::MulticoreParam(calc_cores, RNGseed = seed)
+  if (r == 1) msg("AUCell_calcAUC, aucMaxRank = ",
+                  if (is.null(aargs$aucMaxRank)) paste0(ceiling(0.05 * nrow(rankings)), " (AUCell default, 5% of genes)")
+                  else aargs$aucMaxRank, if (repeats > 1) paste0("; averaging ", repeats, " tie-breaking seeds") else "")
+  set.seed(seed)
+  a <- getAUC(do.call(AUCell_calcAUC, aargs))     # programs x cells
+  auc <- if (is.null(auc)) a else auc + a
+  rm(rankings); invisible(gc())
 }
-if ("nCores" %in% fc) aargs$nCores <- cores else if ("BPPARAM" %in% fc)
-  aargs$BPPARAM <- BiocParallel::MulticoreParam(cores)
-msg("AUCell_calcAUC, aucMaxRank = ",
-    if (is.null(aargs$aucMaxRank)) paste0(ceiling(0.05 * nrow(rankings)), " (AUCell default, 5% of genes)")
-    else aargs$aucMaxRank)
-auc <- getAUC(do.call(AUCell_calcAUC, aargs))     # programs x cells
+auc <- auc / repeats
+rm(mat); invisible(gc())
 
 out <- data.frame(cell = colnames(auc), t(auc), check.names = FALSE)
 write.table(out, opt$out, sep = "\t", quote = FALSE, row.names = FALSE)

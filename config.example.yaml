@@ -16,6 +16,7 @@ data:
 programs:
   file: null
   min_genes: 20
+  background: null
   discover:
     h5ad: null
     counts_layer: null
@@ -47,6 +48,8 @@ aucell:
   cores: 1
   max_rank: null
   rankings_cache: null
+  seed: null
+  n_repeats: 1
 association:
   min_perturbed: 10
   n_perm: 10000
@@ -74,7 +77,7 @@ enrichment:
   min_overlap: 3
   max_term_size: 500
 annotation:
-  backend: auto
+  backend: claude-code
   context: ''
   model: null
   web_search: true

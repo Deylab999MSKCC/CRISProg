@@ -36,7 +36,7 @@ def program_recovery(programs, genes, min_genes):
 
 
 def run_aucell(X, genes, cells, programs, workdir, rscript="Rscript", cores=1, max_rank=None, seed=1,
-               rankings=None, keep_input=False):
+               rankings=None, keep_input=False, repeats=1):
     """X: cells x genes (normalized). Returns a cells x programs DataFrame indexed by cell."""
     X = sp.csr_matrix(X)
     _, first = np.unique(genes, return_index=True)
@@ -64,7 +64,8 @@ def run_aucell(X, genes, cells, programs, workdir, rscript="Rscript", cores=1, m
         os.path.join(tmp, "programs.tsv"), sep="\t", index=False)
 
     out = os.path.join(workdir, "aucell_scores.tsv")
-    cmd = [rscript, R_SCRIPT, "--input", tmp, "--out", out, "--cores", str(cores), "--seed", str(seed)]
+    cmd = [rscript, R_SCRIPT, "--input", tmp, "--out", out, "--cores", str(cores), "--seed", str(seed),
+           "--repeats", str(int(repeats))]
     if max_rank:
         cmd += ["--max-rank", str(max_rank)]
     if rankings:

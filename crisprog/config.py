@@ -22,6 +22,8 @@ DEFAULTS = {
     "programs": {
         "file": None,                      # .gmt or TSV (program, gene): use these and skip discovery
         "min_genes": 20,                   # drop programs with fewer genes measured in data.h5ad
+        "background": None,                # gene list (one per line) used as the enrichment background for given
+                                           # programs, e.g. the genes the programs were built from
         "discover": {
             "h5ad": None,                  # data to discover programs from (default data.h5ad)
             "counts_layer": None,          # default data.counts_layer
@@ -43,7 +45,9 @@ DEFAULTS = {
         },
     },
     "covariates": {"use": ["log_n_genes", "moi"], "batch": [], "moi_col": None},
-    "aucell": {"rscript": "Rscript", "cores": 1, "max_rank": None, "rankings_cache": None},
+    "aucell": {"rscript": "Rscript", "cores": 1, "max_rank": None, "rankings_cache": None,
+               "seed": None,                # tie-breaking seed (default: association.seed)
+               "n_repeats": 1},             # average the AUC over this many tie-breaking seeds
     "association": {"min_perturbed": 10, "n_perm": 10000, "perm_p": "auto", "pool_bins": 5, "depth_bins": 10,
                     "fdr_scope": "program", "fdr": 0.05, "seed": 1},
     "gene_test": {"fdr": 0.05, "n_null": 20, "chunk": 2000, "seed": 1},
@@ -57,7 +61,8 @@ DEFAULTS = {
                    "model": None, "web_search": True, "max_turns": 60},
 }
 
-PATH_KEYS = [("data", "h5ad"), ("data", "target_map"), ("programs", "file"), ("programs", "discover", "h5ad"),
+PATH_KEYS = [("data", "h5ad"), ("data", "target_map"), ("programs", "file"), ("programs", "background"),
+             ("programs", "discover", "h5ad"),
              ("aucell", "rankings_cache")]
 
 
