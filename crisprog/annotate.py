@@ -60,8 +60,8 @@ A Markdown report with exactly these sections:
   and for each program's main theme; prefer PubMed and primary papers.
 - Attribute every association to the exact unit it was tested for, in every section including the Overview.
   Never describe one unit's association as another's, even when the two share perturbed cells; describe such
-  pairs explicitly as a pair (e.g. "unit A raises M-1; unit B, which shares its cells, raises M-1 and lowers
-  M-3").
+  pairs explicitly as a pair (e.g. "unit A raises program X; unit B, which shares its cells, raises program X
+  and lowers program Y"). Use the unit and program names exactly as they appear in packet.md.
 - For each regulator, search not only for the gene itself but for how its known function could connect to the
   biology of the programs it moves (signaling pathways, metabolism and nutrient sensing, chromatin, cell
   cycle). Mechanistic links are often found one step away from the gene name.
