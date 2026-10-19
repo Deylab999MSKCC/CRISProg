@@ -35,6 +35,21 @@ def program_recovery(programs, genes, min_genes):
     return keep, stats
 
 
+def write_r_matrix(X, genes, cells, d):
+    """Write a cells x genes matrix for the R scripts: matrix.h5 (genes x cells CSC), genes.txt, cells.txt."""
+    X = sp.csr_matrix(X)
+    X.sort_indices()
+    os.makedirs(d, exist_ok=True)
+    with h5py.File(os.path.join(d, "matrix.h5"), "w") as f:       # cells x genes CSR == genes x cells CSC
+        f["data"] = X.data.astype(np.float32)
+        f["indices"] = X.indices.astype(np.int32)
+        f["indptr"] = X.indptr.astype(np.int32)
+        f["shape"] = np.array([X.shape[1], X.shape[0]], dtype=np.int32)
+    for name, vals in (("genes.txt", genes), ("cells.txt", cells)):
+        with open(os.path.join(d, name), "w") as fh:
+            fh.write("\n".join(map(str, vals)) + "\n")
+
+
 def run_aucell(X, genes, cells, programs, workdir, rscript="Rscript", cores=1, max_rank=None, seed=1,
                rankings=None, keep_input=False, repeats=1):
     """X: cells x genes (normalized). Returns a cells x programs DataFrame indexed by cell."""
@@ -51,15 +66,7 @@ def run_aucell(X, genes, cells, programs, workdir, rscript="Rscript", cores=1, m
                          "subset genes (e.g. drop genes detected in very few cells) first")
 
     tmp = os.path.join(workdir, "aucell_input")
-    os.makedirs(tmp, exist_ok=True)
-    with h5py.File(os.path.join(tmp, "matrix.h5"), "w") as f:     # cells x genes CSR == genes x cells CSC
-        f["data"] = X.data.astype(np.float32)
-        f["indices"] = X.indices.astype(np.int32)
-        f["indptr"] = X.indptr.astype(np.int32)
-        f["shape"] = np.array([X.shape[1], X.shape[0]], dtype=np.int32)
-    for name, vals in (("genes.txt", genes), ("cells.txt", cells)):
-        with open(os.path.join(tmp, name), "w") as fh:
-            fh.write("\n".join(map(str, vals)) + "\n")
+    write_r_matrix(X, genes, cells, tmp)
     pd.DataFrame([(p, g) for p, gl in programs.items() for g in gl], columns=["program", "gene"]).to_csv(
         os.path.join(tmp, "programs.tsv"), sep="\t", index=False)
 

@@ -24,19 +24,27 @@ programs:
     counts_layer: null
     gene_col: null
     methods:
-    - pca
-    - cnmf
+    - hotspot
+    - hdwgcna
     max_cells: 20000
     min_cells_frac: 0.005
     n_hvg: 2000
     n_pcs: 30
-    cnmf_k: 10
-    cnmf_n_iter: 50
-    cnmf_density_threshold: 0.5
-    n_neighbors: 30
-    n_genes: 1000
-    min_module_genes: 20
-    fdr: 0.05
+    hotspot:
+      n_neighbors: 30
+      n_genes: 1000
+      min_module_genes: 20
+      fdr: 0.05
+    hdwgcna:
+      group_col: null
+      gene_fraction: 0.05
+      metacell_k: 25
+      max_shared: 10
+      min_cells: 100
+      soft_power: null
+      min_module_size: 50
+      deep_split: 4
+      merge_cut_height: 0.2
     jobs: 4
     seed: 0
 covariates:

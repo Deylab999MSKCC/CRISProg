@@ -12,10 +12,11 @@ data:
 programs:
   file: null                  # set to ../data/example/programs.gmt to use the true programs instead of discovering them
   discover:
-    methods: [pca, cnmf]
-    cnmf_k: 5
-    cnmf_n_iter: 20
-    n_genes: 500
+    methods: [hotspot, hdwgcna]
+    hotspot:
+      n_genes: 500
+    hdwgcna:
+      soft_power: 12          # the simulation is ~90% pure-noise genes, which fools the automatic choice
 
 covariates:
   use: [log_n_genes, moi]

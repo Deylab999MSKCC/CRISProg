@@ -6,7 +6,7 @@ Each perturbation changes downstream (trans) genes only a little, and testing ev
 
 | Step | What it does | Output folder |
 |---|---|---|
-| `programs` | Discovers programs with **Hotspot** on a **PCA** and/or **cNMF** cell embedding, or takes programs you give it | `1_programs/` |
+| `programs` | Discovers programs with **Hotspot** and/or **hdWGCNA** (both on a PCA of the cells), or takes programs you give it | `1_programs/` |
 | `score` | Scores every program in every cell with **AUCell** (Bioconductor, run through R); ranks each program's genes by their correlation with its score (hub genes) | `2_scores/` |
 | `test` | `program score ~ perturbed + covariates` for every perturbation × program; stratified-permutation P-values; FDR within each program | `3_association/` |
 | `genes` | For the significant perturbations: the same model on every gene; per-program heatmaps; how broad and how concentrated each effect is; flags | `4_gene_test/` |
@@ -19,9 +19,10 @@ Each perturbation changes downstream (trans) genes only a little, and testing ev
 git clone <repo-url> && cd CRISProg
 conda env create -f environment.yml
 conda activate crisprog
+Rscript -e 'remotes::install_github("smorabit/hdWGCNA", ref = "dev", upgrade = "never")'   # not on conda
 ```
 
-You can also use an existing setup: Python ≥ 3.10 with `numpy scipy pandas anndata h5py matplotlib scanpy pyyaml requests hotspotsc cnmf anthropic`, plus R with the Bioconductor packages `AUCell` and `rhdf5`.
+You can also use an existing setup: Python ≥ 3.10 with `numpy scipy pandas anndata h5py matplotlib scanpy pyyaml requests hotspotsc anthropic`, plus R with the Bioconductor packages `AUCell` and `rhdf5`, and `Seurat`, `WGCNA` and `hdWGCNA` for hdWGCNA discovery.
 
 ## Quick start (simulated screen)
 
@@ -30,7 +31,7 @@ python example/make_example.py              # writes the simulated screen to dat
 python crisprog.py run example/config.yaml  # results in results/example/
 ```
 
-The simulation has three co-expressed programs (PROG_A–C) and two planted regulators: *G0005* raises PROG_A and *G0900* lowers PROG_B. Discovery recovers the three programs from both embeddings, and the association test finds both regulators. The per-gene step also flags two null targets (*G1019*, *G1105*) whose "effect" on an extra module is only their own knockdown. Program discovery takes most of the time (cNMF); set `programs.file: ../data/example/programs.gmt` in the config to skip it.
+The simulation has three co-expressed programs (PROG_A–C) and two planted regulators: *G0005* raises PROG_A and *G0900* lowers PROG_B. Discovery recovers the three programs from both embeddings, and the association test finds both regulators. The per-gene step also flags two null targets (*G1019*, *G1105*) whose "effect" on an extra module is only their own knockdown. Program discovery takes about 1.5 min; set `programs.file: ../data/example/programs.gmt` in the config to skip it.
 
 ## Running
 
@@ -60,7 +61,11 @@ python crisprog.py genes config.yaml               # one step
 
 ## Method details
 
-**Program discovery.** For each embedding, Hotspot builds a cell kNN graph and finds genes whose expression is locally autocorrelated on it. It then groups the top autocorrelated genes into modules by their pairwise local correlations. Each module is a program: a discrete gene set, which is what AUCell needs. cNMF is used only as an embedding (its per-cell usages). Its continuous gene weights are not used as programs, because there is no natural cutoff for membership and the default TPM-scale weights mostly track expression level.
+**Program discovery.** Both methods start from the same PCA of the discovery cells (normalize, log, highly variable genes, scale, 30 PCs), and each module they return is a program: a discrete gene set, which is what AUCell needs. Methods that give continuous gene weights (e.g. NMF/cNMF spectra) are not used, because there is no natural cutoff for membership.
+- **Hotspot** (`hotspot`) builds a cell kNN graph on the PCA, finds genes whose expression is locally autocorrelated on it, and groups the top autocorrelated genes into modules by their pairwise local correlations. Hotspot has no embedding of its own, so the PCA is required. Programs are named `Hotspot-1, -2, …`; genes are ranked by autocorrelation Z.
+- **hdWGCNA** (`hdwgcna`) averages nearest-neighbour cells on the PCA into metacells (within each `hdwgcna.group_col` group, e.g. sample or time point), builds a signed co-expression network on genes expressed in ≥ 5% of cells, and cuts it into modules. Programs are named by the module colour (`hdWGCNA-turquoise`, …); genes are ranked by kME, their correlation with the module eigengene. The soft power defaults to hdWGCNA's rule, the lowest power whose scale-free fit R² reaches 0.8; check `hdwgcna_modules_soft_powers.tsv`, and set `hdwgcna.soft_power` if the chosen power has a slope far from −1 (on the simulated example the rule picks 5 with slope −14 and misses a program; 12 recovers all three).
+
+The two methods are run independently and can find the same biology twice; near-duplicate programs both enter the FDR correction, so consider keeping one of each pair.
 
 **Discovering programs from the screen itself** is allowed but can be circular: a target's own knockdown creates structure, and the target can end up inside a module. The per-gene step catches this (see Flags). A separate discovery dataset avoids it.
 
@@ -102,7 +107,7 @@ The output is checked for completeness (all required sections, a minimum length)
 
 | File | Content |
 |---|---|
-| `1_programs/programs.tsv`, `.gmt`, `programs_summary.tsv` | Discovered programs (gene, rank, method) |
+| `1_programs/programs.tsv`, `.gmt`, `programs_summary.tsv` | Discovered programs (gene, rank, method, score) |
 | `2_scores/aucell_scores.tsv`, `program_gene_ranking.tsv` | Cells × programs scores; hub genes per program |
 | `3_association/results.tsv`, `volcano.pdf`, `calibration.tsv` | All unit × program tests |
 | `4_gene_test/program_summary.tsv`, `heatmap_<program>.pdf`, `overlap.tsv`, `gene_results.tsv.gz` | Per-gene follow-up |
@@ -111,15 +116,15 @@ The output is checked for completeness (all required sections, a minimum length)
 
 ## Validation
 
-- `pytest -q tests/` (about 1 min; needs R with AUCell). The tests check:
+- `pytest -q tests/` (about 2 min; needs R with AUCell, and hdWGCNA for its test). The tests check:
   - the OLS against direct fits
   - the permutation P-values against a brute-force version
   - planted regulators found with calibrated nulls, using given programs
-  - discovery recovering the planted programs (gene-set Jaccard > 0.8)
+  - Hotspot and hdWGCNA each recovering the planted programs (gene-set Jaccard > 0.8)
 
 ## Citation
 
-If you use CRISProg, please cite AUCell (Aibar et al. 2017, *Nat. Methods*), Hotspot (DeTomaso & Yosef 2021, *Cell Systems*), cNMF (Kotliar et al. 2019, *eLife*), Enrichr (Kuleshov et al. 2016, *Nucleic Acids Res.*) and the paper this method comes from (reference to be added).
+If you use CRISProg, please cite AUCell (Aibar et al. 2017, *Nat. Methods*), Hotspot (DeTomaso & Yosef 2021, *Cell Systems*), hdWGCNA (Morabito et al. 2023, *Cell Reports Methods*), WGCNA (Langfelder & Horvath 2008, *BMC Bioinformatics*), Enrichr (Kuleshov et al. 2016, *Nucleic Acids Res.*) and the paper this method comes from (reference to be added).
 
 ## License
 

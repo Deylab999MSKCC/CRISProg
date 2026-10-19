@@ -105,8 +105,8 @@ def build_packet(cfg, out):
         coherence = rk.groupby("program").r_with_score.median().round(3).to_dict()
     else:
         ranked = {p: P.get(p, []) for p in scored}
-        rank_note = {p: ("ranked by Hotspot autocorrelation" if method.get(p, "given") in ("pca", "cnmf")
-                         else "file order, not ranked") for p in scored}
+        note = {"hotspot": "ranked by Hotspot autocorrelation", "hdwgcna": "ranked by hdWGCNA kME"}
+        rank_note = {p: note.get(method.get(p, "given"), "file order, not ranked") for p in scored}
         coherence = {}
 
     def terms(df, name, n=5):

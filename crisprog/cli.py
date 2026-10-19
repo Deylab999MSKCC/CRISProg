@@ -13,7 +13,7 @@ USAGE = """
 CRISProg: which perturbations in a single-cell CRISPR screen drive which gene programs, and what that means.
 
 Steps (outputs in results/<name>/<n>_<step>/):
-  programs   discover gene programs with Hotspot on a PCA and/or cNMF cell embedding
+  programs   discover gene programs with Hotspot and/or hdWGCNA (both on a PCA)
              (or take a program file you give in the config)
   score      AUCell score of every program in every cell (Bioconductor AUCell, run through R)
   test       program score ~ perturbed + covariates for every perturbation x program, stratified

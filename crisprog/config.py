@@ -34,18 +34,28 @@ DEFAULTS = {
             "h5ad": None,                  # data to discover programs from (default data.h5ad)
             "counts_layer": None,          # default data.counts_layer
             "gene_col": None,              # default data.gene_col
-            "methods": ["pca", "cnmf"],    # cell embeddings for Hotspot
-            "max_cells": 20000,            # subsample for speed (Hotspot/cNMF scale with cells)
+            "methods": ["hotspot", "hdwgcna"],
+            "max_cells": 20000,            # subsample for speed
             "min_cells_frac": 0.005,       # keep genes detected in at least this fraction of cells
-            "n_hvg": 2000,
+            "n_hvg": 2000,                 # PCA (shared by both methods): highly variable genes and components
             "n_pcs": 30,
-            "cnmf_k": 10,
-            "cnmf_n_iter": 50,
-            "cnmf_density_threshold": 0.5,
-            "n_neighbors": 30,
-            "n_genes": 1000,               # top autocorrelated genes (FDR < fdr) used to build modules
-            "min_module_genes": 20,
-            "fdr": 0.05,
+            "hotspot": {
+                "n_neighbors": 30,         # cell kNN graph on the PCA
+                "n_genes": 1000,           # top autocorrelated genes (FDR < fdr) used to build modules
+                "min_module_genes": 20,
+                "fdr": 0.05,
+            },
+            "hdwgcna": {
+                "group_col": None,         # .obs column; metacells are built within each group (e.g. sample)
+                "gene_fraction": 0.05,     # genes expressed in at least this fraction of cells
+                "metacell_k": 25,          # cells per metacell (nearest neighbours on the PCA)
+                "max_shared": 10,          # max cells two metacells may share
+                "min_cells": 100,          # groups with fewer cells are skipped
+                "soft_power": None,        # default: lowest power with scale-free fit R^2 >= 0.8
+                "min_module_size": 50,
+                "deep_split": 4,
+                "merge_cut_height": 0.2,
+            },
             "jobs": 4,
             "seed": 0,
         },
@@ -110,6 +120,9 @@ def load(path):
     cfg["results_dir"] = resolve(cfg["results_dir"]) if cfg["results_dir"] else os.path.join(REPO, "results")
     cfg["outdir"] = os.path.join(cfg["results_dir"], name)            # used internally by every step
     disc = cfg["programs"]["discover"]
+    if set(disc["methods"]) & {"pca", "cnmf"}:
+        raise SystemExit("config: programs.discover.methods are now hotspot and/or hdwgcna (cNMF was removed; "
+                         "Hotspot always runs on the PCA)")
     for k, src in (("h5ad", "h5ad"), ("counts_layer", "counts_layer"), ("gene_col", "gene_col")):
         if disc[k] is None:
             disc[k] = cfg["data"][src]

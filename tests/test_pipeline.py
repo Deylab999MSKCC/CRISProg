@@ -70,6 +70,10 @@ needs_r = pytest.mark.skipif(
     shutil.which("Rscript") is None or subprocess.run(
         ["Rscript", "-e", "library(AUCell); library(rhdf5)"], capture_output=True).returncode != 0,
     reason="Rscript with AUCell and rhdf5 not available")
+needs_hdwgcna = pytest.mark.skipif(
+    shutil.which("Rscript") is None or subprocess.run(
+        ["Rscript", "-e", "library(hdWGCNA); library(rhdf5)"], capture_output=True).returncode != 0,
+    reason="Rscript with hdWGCNA not available")
 
 
 def _config(tmp_path, data, **programs):
@@ -119,18 +123,32 @@ def test_given_programs_end_to_end(tmp_path, example_data):
     assert gcal["frac_p_lt_0.05"].between(0.02, 0.09).all()
 
 
-@needs_r
-@pytest.mark.slow
-def test_discovery_recovers_planted_programs(tmp_path, example_data):
-    from crisprog import cli
-    cfgp = _config(tmp_path, example_data, discover={"methods": ["pca"], "n_genes": 500})
-    cli.main(["programs", cfgp])
-    P = pd.read_csv(tmp_path / "out" / "1_programs" / "programs.tsv", sep="\t")
+def _recovered(P):
     truth = {"PROG_A": range(1, 81), "PROG_B": range(81, 161), "PROG_C": range(161, 241)}
     for name, idx in truth.items():
         t = {f"G{i:04d}" for i in idx}
         best = max(len(t & set(g.gene)) / len(t | set(g.gene)) for _, g in P.groupby("program"))
         assert best > 0.8, (name, best)
+
+
+@needs_r
+@pytest.mark.slow
+def test_discovery_recovers_planted_programs(tmp_path, example_data):
+    from crisprog import cli
+    cfgp = _config(tmp_path, example_data, discover={"methods": ["hotspot"], "hotspot": {"n_genes": 500}})
+    cli.main(["programs", cfgp])
+    _recovered(pd.read_csv(tmp_path / "out" / "1_programs" / "programs.tsv", sep="\t"))
+
+
+@needs_hdwgcna
+@pytest.mark.slow
+def test_hdwgcna_recovers_planted_programs(tmp_path, example_data):
+    from crisprog import cli
+    cfgp = _config(tmp_path, example_data, discover={"methods": ["hdwgcna"], "hdwgcna": {"soft_power": 12}})
+    cli.main(["programs", cfgp])
+    P = pd.read_csv(tmp_path / "out" / "1_programs" / "programs.tsv", sep="\t")
+    assert set(P.method) == {"hdwgcna"} and P.groupby("program").score.apply(lambda s: s.is_monotonic_decreasing).all()
+    _recovered(P)
 
 
 def test_annotation_retries_incomplete_report(tmp_path, example_data, monkeypatch):

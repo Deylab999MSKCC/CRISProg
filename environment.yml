@@ -24,7 +24,20 @@ dependencies:
   - bioconductor-biocparallel
   - r-domc                   # AUCell's parallel AUC computation
   - r-dorng
+  - r-seurat                 # hdWGCNA (program discovery) and its dependencies; hdWGCNA itself is not on conda:
+  - r-wgcna                  #   Rscript -e 'remotes::install_github("smorabit/hdWGCNA", ref = "dev", upgrade = "never")'
+  - r-harmony
+  - r-ggraph
+  - r-tidygraph
+  - r-ggrepel
+  - r-proxy
+  - r-tester
+  - r-enrichr
+  - r-remotes
+  - bioconductor-ucell
+  - bioconductor-geneoverlap
+  - bioconductor-genomicranges
+  - bioconductor-summarizedexperiment
   - pip:
       - hotspotsc
-      - cnmf
       - anthropic

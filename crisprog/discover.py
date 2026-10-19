@@ -1,16 +1,18 @@
-"""Program discovery: Hotspot gene modules on a PCA and/or cNMF cell embedding.
+"""Program discovery: Hotspot and/or hdWGCNA gene modules. Each module is one program: a discrete gene set
+(what AUCell needs). Both methods start from the same PCA of the discovery data.
 
-For each embedding, Hotspot builds a cell kNN graph, finds genes whose expression is locally autocorrelated
-on that graph, and groups the top autocorrelated genes into modules by their local correlations. Each module
-is one program: a discrete gene set (what AUCell needs). cNMF is used only as an embedding (its per-cell usages);
-its continuous gene weights are not used as programs.
+  hotspot   Hotspot (DeTomaso & Yosef 2021) builds a cell kNN graph on the PCA, finds genes whose expression is
+            locally autocorrelated on it, and groups the top autocorrelated genes into modules by their local
+            correlations. Hotspot has no embedding of its own; it needs one, which is why PCA comes first.
+  hdwgcna   hdWGCNA (Morabito et al. 2023) averages cells into metacells (nearest neighbours on the PCA), builds
+            a signed co-expression network on them and cuts it into modules (R/hdwgcna.R).
 
 Outputs (programs step folder):
-  programs.tsv                program, gene, rank (by autocorrelation Z within the module), method, autocorr_Z
+  programs.tsv                program, gene, rank, method, score (Hotspot autocorrelation Z, or hdWGCNA kME);
+                              genes ranked by score within each program
   programs.gmt
   programs_summary.tsv        program, method, n_genes, top genes
-  <method>_autocorrelation.tsv, <method>_modules.tsv
-  cnmf/                       cNMF run (usages, spectra, k-selection) when cnmf is used
+  hotspot_autocorrelation.tsv, hotspot_modules.tsv, hdwgcna_modules.tsv
 """
 import os
 
@@ -20,7 +22,9 @@ import scipy.sparse as sp
 
 from .utils import log
 
-LABEL = {"pca": "PCA", "cnmf": "cNMF"}
+LABEL = {"hotspot": "Hotspot", "hdwgcna": "hdWGCNA"}
+COLS = ["program", "gene", "rank", "method", "score"]
+R_SCRIPT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "R", "hdwgcna.R")
 
 
 def _load(dc):
@@ -46,9 +50,13 @@ def _load(dc):
     good = tot > 0
     counts = counts[good]
     cells = ad.obs_names.to_numpy()[rows][good].astype(str)
+    gc = dc["hdwgcna"]["group_col"]
+    if gc and gc not in ad.obs:
+        raise SystemExit(f"programs.discover.hdwgcna.group_col '{gc}' is not a column of {dc['h5ad']} .obs")
+    groups = ad.obs[gc].astype(str).to_numpy()[rows][good] if gc else None
     log(f"discovery data: {len(cells):,} cells x {len(genes):,} genes (detected in >= "
         f"{max(10, int(dc['min_cells_frac'] * len(rows)))} cells)")
-    return cells, genes, counts
+    return cells, genes, counts, groups
 
 
 def _pca(counts, genes, dc):
@@ -66,43 +74,8 @@ def _pca(counts, genes, dc):
     return ad.obsm["X_pca"]
 
 
-def _cnmf_worker(args):
-    from cnmf import cNMF
-    d, i, n = args
-    cNMF(output_dir=d, name="cnmf").factorize(worker_i=i, total_workers=n)
-
-
-def _cnmf(counts, genes, cells, dc, out):
-    import anndata
-    from cnmf import cNMF
-    d = os.path.join(out, "cnmf")
-    os.makedirs(d, exist_ok=True)
-    fn = os.path.join(d, "counts.h5ad")
-    anndata.AnnData(X=counts.astype(np.float32), obs=pd.DataFrame(index=cells),
-                    var=pd.DataFrame(index=genes)).write_h5ad(fn)
-    k, dt = int(dc["cnmf_k"]), float(dc["cnmf_density_threshold"])
-    obj = cNMF(output_dir=d, name="cnmf")
-    log(f"cNMF: K = {k}, {dc['cnmf_n_iter']} runs over {min(int(dc['jobs']), int(dc['cnmf_n_iter']))} worker(s), "
-        f"{dc['n_hvg']} highly variable genes")
-    obj.prepare(counts_fn=fn, components=[k], n_iter=int(dc["cnmf_n_iter"]), seed=int(dc["seed"]),
-                num_highvar_genes=int(dc["n_hvg"]))
-    workers = max(1, min(int(dc["jobs"]), int(dc["cnmf_n_iter"])))
-    if workers == 1:
-        obj.factorize(worker_i=0, total_workers=1)
-    else:                                                   # cNMF splits its runs over independent workers
-        from concurrent.futures import ProcessPoolExecutor
-        with ProcessPoolExecutor(workers) as ex:
-            list(ex.map(_cnmf_worker, [(d, i, workers) for i in range(workers)]))
-    obj.combine()
-    obj.consensus(k=k, density_threshold=dt, show_clustering=False, close_clustergram_fig=True)
-    usage, scores, tpm, top = obj.load_results(K=k, density_threshold=dt)
-    usage.index = usage.index.astype(str)
-    usage = usage.reindex(cells).fillna(0.0)
-    usage.to_csv(os.path.join(d, "usage.tsv"), sep="\t")
-    return usage.to_numpy()
-
-
-def _hotspot(counts, genes, cells, emb, method, dc, out):
+def _hotspot(counts, genes, cells, emb, dc, out):
+    hc, method = dc["hotspot"], "hotspot"
     import anndata
     import hotspot
     ad = anndata.AnnData(X=sp.csc_matrix(counts.astype(np.float64)), obs=pd.DataFrame(index=cells),
@@ -112,43 +85,82 @@ def _hotspot(counts, genes, cells, emb, method, dc, out):
     ad.obsm["X_emb"] = np.asarray(emb, dtype=np.float64)
     hs = hotspot.Hotspot(ad, layer_key="counts", model="danb", latent_obsm_key="X_emb",
                          umi_counts_obs_key="total_counts")
-    hs.create_knn_graph(weighted_graph=False, n_neighbors=int(dc["n_neighbors"]))
+    hs.create_knn_graph(weighted_graph=False, n_neighbors=int(hc["n_neighbors"]))
     auto = hs.compute_autocorrelations(jobs=int(dc["jobs"]))
     auto.to_csv(os.path.join(out, f"{method}_autocorrelation.tsv"), sep="\t")
-    sig = auto[auto.FDR < dc["fdr"]].sort_values("Z", ascending=False).head(int(dc["n_genes"]))
-    log(f"Hotspot ({LABEL[method]}): {int((auto.FDR < dc['fdr']).sum()):,} autocorrelated genes at FDR < "
-        f"{dc['fdr']}; building modules from the top {len(sig):,}")
-    if len(sig) < dc["min_module_genes"]:
-        log(f"WARNING: too few autocorrelated genes for {LABEL[method]} modules")
-        return pd.DataFrame(columns=["program", "gene", "rank", "method", "autocorr_Z"])
+    sig = auto[auto.FDR < hc["fdr"]].sort_values("Z", ascending=False).head(int(hc["n_genes"]))
+    log(f"Hotspot: {int((auto.FDR < hc['fdr']).sum()):,} autocorrelated genes at FDR < {hc['fdr']}; "
+        f"building modules from the top {len(sig):,}")
+    if len(sig) < hc["min_module_genes"]:
+        log("WARNING: too few autocorrelated genes for Hotspot modules")
+        return pd.DataFrame(columns=COLS)
     hs.compute_local_correlations(sig.index, jobs=int(dc["jobs"]))
-    modules = hs.create_modules(min_gene_threshold=int(dc["min_module_genes"]), core_only=True,
-                                fdr_threshold=dc["fdr"])
+    modules = hs.create_modules(min_gene_threshold=int(hc["min_module_genes"]), core_only=True,
+                                fdr_threshold=hc["fdr"])
     modules.rename("module").to_frame().to_csv(os.path.join(out, f"{method}_modules.tsv"), sep="\t")
     rows = []
     for m in sorted(x for x in modules.unique() if x != -1):
         g = auto.loc[modules.index[modules == m]].sort_values("Z", ascending=False)
-        name = f"{LABEL[method]}-HS{int(m)}"
+        name = f"Hotspot-{int(m)}"
         rows += [(name, gene, i + 1, method, float(z)) for i, (gene, z) in enumerate(g.Z.items())]
-    res = pd.DataFrame(rows, columns=["program", "gene", "rank", "method", "autocorr_Z"])
-    log(f"Hotspot ({LABEL[method]}): {res.program.nunique()} modules, "
+    res = pd.DataFrame(rows, columns=COLS)
+    log(f"Hotspot: {res.program.nunique()} modules, "
         f"{int((modules != -1).sum())} genes assigned, {int((modules == -1).sum())} unassigned")
     return res
+
+
+def _hdwgcna(counts, genes, cells, groups, emb, dc, rscript, out):
+    import shutil
+    import subprocess
+    from .aucell import write_r_matrix
+    wc = dc["hdwgcna"]
+    tmp = os.path.join(out, "hdwgcna_input")
+    write_r_matrix(counts, genes, cells, tmp)
+    pd.DataFrame(emb, index=cells).to_csv(os.path.join(tmp, "pca.tsv"), sep="\t")
+    if groups is not None:
+        with open(os.path.join(tmp, "groups.txt"), "w") as fh:
+            fh.write("\n".join(groups) + "\n")
+    res = os.path.join(out, "hdwgcna_modules.tsv")
+    cmd = [rscript, R_SCRIPT, "--input", tmp, "--out", res, "--threads", str(dc["jobs"]), "--seed", str(dc["seed"]),
+           "--fraction", str(wc["gene_fraction"]), "--k", str(wc["metacell_k"]),
+           "--max-shared", str(wc["max_shared"]), "--min-cells", str(wc["min_cells"]),
+           "--min-module-size", str(wc["min_module_size"]), "--deep-split", str(wc["deep_split"]),
+           "--merge-cut-height", str(wc["merge_cut_height"])]
+    if wc["soft_power"]:
+        cmd += ["--soft-power", str(wc["soft_power"])]
+    log("running hdWGCNA in R: " + " ".join(cmd))
+    try:
+        subprocess.run(cmd, check=True)
+    except FileNotFoundError:
+        raise SystemExit(f"'{rscript}' not found; install R with Seurat, WGCNA and hdWGCNA (see environment.yml)")
+    except subprocess.CalledProcessError as e:
+        raise SystemExit(f"hdWGCNA (R) failed with exit code {e.returncode}; see the messages above")
+    shutil.rmtree(tmp, ignore_errors=True)
+    M = pd.read_csv(res, sep="\t")
+    rows = []
+    for m, g in M.groupby("module", sort=False):
+        g = g.sort_values("kME", ascending=False)
+        rows += [(f"hdWGCNA-{m}", gene, i + 1, "hdwgcna", float(k)) for i, (gene, k) in enumerate(zip(g.gene, g.kME))]
+    return pd.DataFrame(rows, columns=COLS)
 
 
 def discover_programs(cfg, out):
     dc = cfg["programs"]["discover"]
     bad = set(dc["methods"]) - set(LABEL)
     if bad or not dc["methods"]:
-        raise SystemExit(f"programs.discover.methods must be a subset of {list(LABEL)}")
-    cells, genes, counts = _load(dc)
+        raise SystemExit(f"programs.discover.methods must be a subset of {list(LABEL)} (got {dc['methods']})")
+    cells, genes, counts, groups = _load(dc)
+    emb = _pca(counts, genes, dc)
     allp = []
     for method in dc["methods"]:
-        emb = _pca(counts, genes, dc) if method == "pca" else _cnmf(counts, genes, cells, dc, out)
-        allp.append(_hotspot(counts, genes, cells, emb, method, dc, out))
+        if method == "hotspot":
+            allp.append(_hotspot(counts, genes, cells, emb, dc, out))
+        else:
+            allp.append(_hdwgcna(counts, genes, cells, groups, emb, dc, cfg["aucell"]["rscript"], out))
+    allp = [p for p in allp if len(p)]
+    if not allp:
+        raise SystemExit("no programs found; try more cells or smaller minimum module sizes")
     P = pd.concat(allp, ignore_index=True)
-    if P.empty:
-        raise SystemExit("no programs found; try more cells, a lower min_module_genes or more n_genes")
     P.to_csv(os.path.join(out, "programs.tsv"), sep="\t", index=False, float_format="%.4g")
     with open(os.path.join(out, "programs.gmt"), "w") as fh:
         for p, g in P.groupby("program", sort=False):
