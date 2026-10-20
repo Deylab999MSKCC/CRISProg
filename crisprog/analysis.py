@@ -1,7 +1,7 @@
 """The analysis data, loaded once and shared by the scoring, association and per-gene steps."""
 import numpy as np
 
-from .data import build_units, load_h5ad, parse_guides, read_target_map
+from .data import add_target_genes, build_units, load_h5ad, parse_guides, read_target_map
 from .model import DEPTH, build_design, make_strata
 from .utils import log
 
@@ -30,6 +30,7 @@ class Analysis:
         self.target_map = tmap
         self.U, self.units = build_units(G[keep], guides, tmap, merge_identical=d["merge_identical_targets"])
         self.cells, self.genes = cells[keep], genes
+        self.units = add_target_genes(self.units, genes)
         self.X = X[keep]
         self.counts = counts[keep] if counts is not None else None
         self.obs = obs.iloc[np.flatnonzero(keep)].reset_index(drop=True)

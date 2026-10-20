@@ -97,6 +97,49 @@ def read_target_map(path):
     return d[["guide", "target"]].drop_duplicates().reset_index(drop=True)
 
 
+TARGET_SUFFIX = re.compile(r"(_P\d+(?:P\d+)*|-P\d+(?:P\d+)*(?:-\d+)?|_main|_[BC]|_strong|_weak|_\d+|_[+-]_.*|#.*)$")
+
+
+def target_genes(label, gene_set):
+    """Measured gene(s) a target label refers to.
+
+    The label itself if it is a measured gene; otherwise each '|'-separated part with promoter / TSS / guide
+    suffixes removed until it matches: 'POU5F1_P2' -> POU5F1, 'SOX4_P1P2' -> SOX4, 'AARS_main' -> AARS,
+    'ZNF226_P1|ZNF234_P1' -> ZNF226, ZNF234. Labels with no measured gene give []."""
+    if label in gene_set:
+        return [label]
+    out = []
+    for part in label.split("|"):
+        x = part
+        while x not in gene_set:
+            y = TARGET_SUFFIX.sub("", x)
+            if y == x:
+                break
+            x = y
+        if x in gene_set and x not in out:
+            out.append(x)
+    return out
+
+
+def add_target_genes(units, genes):
+    """units['target_genes']: the measured genes behind each unit's target labels (';'-joined)."""
+    gs = set(map(str, genes))
+    tg, renamed, missing = [], [], []
+    for t in units["targets"].fillna(""):
+        labels = [x for x in str(t).split(";") if x]
+        g = list(dict.fromkeys(y for x in labels for y in target_genes(x, gs)))
+        tg.append(";".join(g))
+        renamed += [x for x in labels if x not in gs and target_genes(x, gs)]
+        missing += [x for x in labels if not target_genes(x, gs)]
+    if renamed:
+        ex = ", ".join(f"{x} -> {'/'.join(target_genes(x, gs))}" for x in renamed[:5])
+        log(f"target names matched to measured genes after removing suffixes: {len(renamed):,} (e.g. {ex})")
+    if missing:
+        log(f"target names with no measured gene (no own-target check for these): {len(missing):,} "
+            f"(e.g. {', '.join(missing[:8])})")
+    return units.assign(target_genes=tg)
+
+
 def build_units(G, guides, target_map=None, merge_identical=True):
     """Test units and the cells x units 0/1 matrix.
 

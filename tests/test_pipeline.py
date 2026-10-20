@@ -170,3 +170,36 @@ if [ $n -eq 1 ]; then echo "I couldn't finish the report: my last reply was stop
     ann = tmp_path / "out" / "6_annotation"
     assert (ann / "report.md").read_text().strip() == good.strip()
     assert "stopped partway" in (ann / "failed_attempt_1.md").read_text()
+
+
+def test_target_genes_resolves_suffixes():
+    from crisprog.data import target_genes
+    gs = {"POU5F1", "SOX4", "AARS", "ZNF226", "ZNF234", "NKX2-5", "GATA6-AS1"}
+    assert target_genes("POU5F1_P2", gs) == ["POU5F1"]
+    assert target_genes("SOX4_P1P2", gs) == ["SOX4"]
+    assert target_genes("AARS_main", gs) == ["AARS"]
+    assert target_genes("ZNF226_P1|ZNF234_P1", gs) == ["ZNF226", "ZNF234"]
+    assert target_genes("NKX2-5", gs) == ["NKX2-5"] and target_genes("GATA6-AS1", gs) == ["GATA6-AS1"]
+    assert target_genes("NOTAGENE_P1", gs) == []
+
+
+@needs_r
+def test_suffixed_target_names(tmp_path, example_data):
+    """A unit named 'G0005_P2' is still recognised as targeting gene G0005 (in-program check, own-target t)."""
+    from crisprog import cli
+    tm = pd.read_csv(example_data / "guide_targets.tsv", sep="\t")
+    tm["target"] = tm.target.replace({"G0005": "G0005_P2"})
+    tm.to_csv(tmp_path / "targets.tsv", sep="\t", index=False)
+    cfgp = _config(tmp_path, example_data, file=str(example_data / "programs.gmt"))
+    import yaml
+    c = yaml.safe_load(open(cfgp))
+    c["data"]["target_map"] = str(tmp_path / "targets.tsv")
+    c["aucell"]["n_repeats"] = 1
+    yaml.safe_dump(c, open(cfgp, "w"))
+    cli.main(["run", cfgp, "--to", "genes"])
+    res = pd.read_csv(tmp_path / "out" / "3_association" / "results.tsv", sep="\t")
+    a = res[(res.unit == "G0005_P2") & (res.program == "PROG_A")].iloc[0]
+    assert a.target_genes == "G0005" and bool(a.target_in_program)
+    summ = pd.read_csv(tmp_path / "out" / "4_gene_test" / "program_summary.tsv", sep="\t")
+    s = summ[(summ.unit == "G0005_P2") & (summ.program == "PROG_A")].iloc[0]
+    assert str(s.target_t).startswith("G0005:")

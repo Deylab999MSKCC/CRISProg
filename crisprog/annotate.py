@@ -210,6 +210,13 @@ def _packet_md(pk):
 REQUIRED = ("## Overview", "## Programs", "## Regulators", "## References")
 
 
+def strip_preamble(text):
+    """Drop anything before the report's first heading (e.g. 'Writing the report now.')."""
+    lines = text.strip().splitlines()
+    first = next((i for i, x in enumerate(lines) if x.startswith("#")), 0)
+    return "\n".join(lines[first:]).strip()
+
+
 def check_report(text):
     """Problems that make an output unusable as the report (empty list = fine)."""
     missing = [h for h in REQUIRED if h not in text]
@@ -229,7 +236,7 @@ def _claude_code(out, an):
     for i in range(1, tries + 1):
         log(f"running Claude Code headless (claude -p), attempt {i}/{tries}; this can take several minutes")
         r = subprocess.run(cmd, cwd=out, capture_output=True, text=True, timeout=3600)
-        text = r.stdout.strip()
+        text = strip_preamble(r.stdout)
         problems = ([f"exit code {r.returncode}: {r.stderr.strip()[:300]}"] if r.returncode != 0 else []) \
             + check_report(text)
         if not problems:
@@ -268,7 +275,7 @@ def _api(out, an, packet_md):
                 url = getattr(c, "url", None)
                 if url:
                     sources[url] = getattr(c, "title", "") or url
-    report = "".join(text)
+    report = strip_preamble("".join(text))
     problems = check_report(report)
     if problems:
         with open(os.path.join(out, "failed_attempt_api.md"), "w") as fh:

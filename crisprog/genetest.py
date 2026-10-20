@@ -32,7 +32,7 @@ logging.getLogger("fontTools").setLevel(logging.ERROR)   # silence font-subsetti
 import pandas as pd
 from scipy import stats
 
-from .data import read_programs
+from .data import read_programs, target_genes
 from .model import OLSEngine, stratified_permutation
 from .utils import benjamini_hochberg, log
 
@@ -95,16 +95,19 @@ def run_gene_test(cfg, A, out):
     for p, gl in progs.items():
         for x in gl:
             member.setdefault(x, []).append(p)
-    targets = {u: set(t.split(";")) if isinstance(t, str) and t else set()
-               for u, t in zip(uidx.unit, uidx.targets.fillna(""))}
-    own = {u: [x for x in str(t).split(";") if x] for u, t in zip(uidx.unit, uidx.targets.fillna(""))}
-    if A.target_map is not None:               # cis set: all genes the unit's guides target (shared CREs too)
+    lab_own = {u: [x for x in str(t).split(";") if x] for u, t in zip(uidx.unit, uidx.targets.fillna(""))}
+    lab_cis = {u: set(xs) for u, xs in lab_own.items()}
+    if A.target_map is not None:               # cis set: all targets of the unit's guides (shared CREs too)
         g2t = A.target_map.groupby("guide").target.apply(set).to_dict()
         for u, gl in zip(uidx.unit, uidx.guides.fillna("")):
             for gd in str(gl).split(";"):
-                targets[u] |= g2t.get(gd, set())
-    unit_of = {x: u for u, xs in own.items() for x in xs}
-    partners = {u: sorted({unit_of[x] for x in targets[u] - set(own[u]) if x in unit_of} - {u}) for u in own}
+                lab_cis[u] |= g2t.get(gd, set())
+    unit_of = {x: u for u, xs in lab_own.items() for x in xs}
+    partners = {u: sorted({unit_of[x] for x in lab_cis[u] - set(lab_own[u]) if x in unit_of} - {u})
+                for u in lab_own}
+    gs = set(map(str, A.genes))                # target labels -> measured genes ('POU5F1_P2' -> POU5F1)
+    own = {u: list(dict.fromkeys(g for x in xs for g in target_genes(x, gs))) for u, xs in lab_own.items()}
+    targets = {u: {g for x in xs for g in target_genes(x, gs)} for u, xs in lab_cis.items()}
 
     long = pd.DataFrame({
         "unit": np.repeat(units_sig, len(genes)), "gene": np.tile(genes, len(units_sig)),

@@ -145,7 +145,7 @@ def step_test(cfg, ctx):
         return o
 
     prog_sets = {p: set(programs.get(p, [])) for p in prog_names}
-    tl = [s.split(";") if s else [] for s in A.units["targets"]]
+    tl = [s.split(";") if s else [] for s in A.units["target_genes"]]   # measured genes behind the targets
     members = [[";".join(x for x in ts if x in prog_sets[p]) for p in prog_names] for ts in tl]
     res = pd.DataFrame({
         "unit": np.repeat(A.units["unit"].to_numpy(), P), "program": np.tile(prog_names, E),
@@ -155,7 +155,8 @@ def step_test(cfg, ctx):
         "target_in_program": pd.array([bool(m) if tl[i] else None for i in range(E) for m in members[i]],
                                        dtype="boolean"),
         "targets_in_program": [m for row in members for m in row],
-        "targets": np.repeat(A.units["targets"].to_numpy(), P), "guides": np.repeat(A.units["guides"].to_numpy(), P),
+        "targets": np.repeat(A.units["targets"].to_numpy(), P),
+        "target_genes": np.repeat(A.units["target_genes"].to_numpy(), P), "guides": np.repeat(A.units["guides"].to_numpy(), P),
     })
     res["program"] = pd.Categorical(res["program"], prog_names)
     res = res.sort_values(["program", "p_perm", "p_ols"]).reset_index(drop=True)
