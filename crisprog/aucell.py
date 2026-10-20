@@ -61,16 +61,44 @@ def run_aucell(X, genes, cells, programs, workdir, rscript="Rscript", cores=1, m
         X, genes = X[:, keep], genes[keep]
     X = sp.csr_matrix(X)
     X.sort_indices()
-    if X.nnz >= 2 ** 31:
-        raise SystemExit("expression matrix has >= 2^31 nonzero values, too many for an R sparse matrix; "
-                         "subset genes (e.g. drop genes detected in very few cells) first")
+    chunks = cell_chunks(X)
+    if len(chunks) > 1:
+        log(f"{X.shape[0]:,} cells, {X.nnz:,} nonzero values: AUCell runs in {len(chunks)} chunks of cells "
+            "(each cell is ranked and scored on its own, so this does not change the method)")
+    parts = []
+    for k, (a, b) in enumerate(chunks):
+        tag = f"_chunk{k + 1}" if len(chunks) > 1 else ""
+        rk = (rankings.replace(".rds", "") + f"{tag}.rds") if rankings and tag else rankings
+        parts.append(_run_chunk(X[a:b], genes, cells[a:b], programs, workdir, tag, rscript, cores, max_rank, seed,
+                                rk, keep_input, repeats))
+    if len(parts) == 1:
+        return parts[0]
+    S = pd.concat(parts)
+    S.to_csv(os.path.join(workdir, "aucell_scores.tsv"), sep="\t")      # what the later steps read
+    return S
 
-    tmp = os.path.join(workdir, "aucell_input")
+
+def cell_chunks(X, max_nnz=2 ** 31 - 2 ** 26, max_cells=250_000):
+    """Row ranges with fewer than max_nnz nonzero values (R sparse-matrix limit) and at most max_cells cells
+    (AUCell's rankings are a dense genes x cells integer matrix)."""
+    out, a, n = [], 0, X.shape[0]
+    while a < n:
+        b = min(n, a + max_cells)
+        while X.indptr[b] - X.indptr[a] >= max_nnz:
+            b = a + (b - a) // 2
+        out.append((a, b))
+        a = b
+    return out
+
+
+def _run_chunk(X, genes, cells, programs, workdir, tag, rscript, cores, max_rank, seed, rankings, keep_input,
+               repeats):
+    tmp = os.path.join(workdir, f"aucell_input{tag}")
     write_r_matrix(X, genes, cells, tmp)
     pd.DataFrame([(p, g) for p, gl in programs.items() for g in gl], columns=["program", "gene"]).to_csv(
         os.path.join(tmp, "programs.tsv"), sep="\t", index=False)
 
-    out = os.path.join(workdir, "aucell_scores.tsv")
+    out = os.path.join(workdir, f"aucell_scores{tag}.tsv")
     cmd = [rscript, R_SCRIPT, "--input", tmp, "--out", out, "--cores", str(cores), "--seed", str(seed),
            "--repeats", str(int(repeats))]
     if max_rank:
@@ -87,8 +115,10 @@ def run_aucell(X, genes, cells, programs, workdir, rscript="Rscript", cores=1, m
         raise SystemExit(f"AUCell (R) failed with exit code {e.returncode}; see the messages above")
     if not keep_input:
         shutil.rmtree(tmp, ignore_errors=True)
-    return read_scores(out)
-
+    S = read_scores(out)
+    if tag:
+        os.remove(out)
+    return S
 
 def read_scores(path):
     """cells x programs TSV whose first column is the cell name."""
