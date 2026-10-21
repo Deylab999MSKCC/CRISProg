@@ -98,7 +98,8 @@ def _merge(base, over):
     for k, v in (over or {}).items():
         if k not in out:
             raise SystemExit(f"unknown config key '{k}' (known: {', '.join(out)})")
-        out[k] = _merge(out[k], v) if isinstance(out[k], dict) and isinstance(v, dict) else v
+        # an empty-dict default (e.g. data.control_types) is free-form: the user's keys are taken as they are
+        out[k] = _merge(out[k], v) if isinstance(out[k], dict) and out[k] and isinstance(v, dict) else v
     return out
 
 

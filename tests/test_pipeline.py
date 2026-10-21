@@ -238,3 +238,14 @@ def test_control_check_detects_confounding(tmp_path, example_data):
     cs = pd.read_csv(tmp_path / "out" / "3_association" / "controls" / "control_summary.tsv", sep="\t")
     fr = dict(zip(cs.program, cs.frac_p_lt_005))
     assert fr["PROG_A"] > 0.3, fr
+
+
+def test_config_free_form_control_types(tmp_path):
+    """data.control_types takes the user's own type names (no 'unknown key' error)."""
+    import yaml
+    from crisprog import config
+    p = tmp_path / "c.yaml"
+    p.write_text(yaml.safe_dump({"data": {"h5ad": "x.h5ad", "guide_col": "guides",
+                                          "control_types": {"non-targeting": "^NTC", "safe-targeting": "^OR"}}}))
+    c = config.load(str(p))
+    assert c["data"]["control_types"] == {"non-targeting": "^NTC", "safe-targeting": "^OR"}
