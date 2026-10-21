@@ -36,13 +36,39 @@ def _dummies(lab, name):
     return [(lab == lv).astype(float) for lv in levels[1:]], [f"{name}={lv}" for lv in levels[1:]]
 
 
-def build_design(names, builtin, obs, batch=()):
+def moi_levels(moi, min_cells=50, max_levels=40):
+    """MOI as categories: integer values, the sparse top levels pooled so that each level has >= min_cells cells.
+    None when MOI is not a small set of integers (then it stays a numeric covariate)."""
+    moi = np.asarray(moi, dtype=float)
+    if not np.allclose(moi, np.round(moi)):
+        return None
+    m = np.round(moi).astype(int)
+    vals, cnt = np.unique(m, return_counts=True)
+    top = vals[-1]
+    while top > vals[0] and cnt[vals >= top].sum() < min_cells:
+        top -= 1
+    m = np.minimum(m, top)
+    return m if len(np.unique(m)) <= max_levels else None
+
+
+def build_design(names, builtin, obs, batch=(), moi_categorical="auto"):
     """Intercept + covariates. Built-ins come from `builtin`, anything else from obs columns.
     Numeric covariates are standardized (only their own coefficients change); categorical
-    ones and --batch columns become 0/1 dummies. Constant covariates are dropped."""
+    ones and --batch columns become 0/1 dummies. Constant covariates are dropped.
+    MOI becomes one dummy per guide count (top counts pooled) when moi_categorical is true, or 'auto' and MOI
+    takes few integer values: each unit is then compared with cells carrying the same number of guides."""
     n = len(obs)
     cols, znames = [np.ones(n)], ["intercept"]
     for nm in names:
+        if nm == "moi" and moi_categorical not in (False, "false", "no") and nm in builtin:
+            lv = moi_levels(builtin[nm])
+            if lv is not None and len(np.unique(lv)) > 1:
+                c, cn = _dummies(lv, "moi")
+                cols += c
+                znames += cn
+                continue
+            if moi_categorical in (True, "true", "yes"):
+                raise SystemExit("covariates.moi_categorical is true but MOI is not a small set of integers")
         if nm in builtin:
             v = pd.Series(builtin[nm])
         elif nm in obs.columns:

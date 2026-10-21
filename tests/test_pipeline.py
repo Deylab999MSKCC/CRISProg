@@ -249,3 +249,38 @@ def test_config_free_form_control_types(tmp_path):
                                           "control_types": {"non-targeting": "^NTC", "safe-targeting": "^OR"}}}))
     c = config.load(str(p))
     assert c["data"]["control_types"] == {"non-targeting": "^NTC", "safe-targeting": "^OR"}
+
+
+@needs_r
+def test_control_population_categorical_moi(tmp_path, example_data):
+    """ES/DE-like design: control guides only in their own single-guide cells, which differ a little as a
+    population. With MOI as categories, control units are compared within that population and stay null."""
+    import anndata
+    from crisprog import cli
+    ad = anndata.read_h5ad(example_data / "example.h5ad")
+    rng = np.random.default_rng(1)
+    g = ad.obs["guides"].astype(str).to_numpy()
+    ctrl = rng.random(len(g)) < 0.25                                   # a quarter of cells: one control guide only
+    g[ctrl] = [f"NTC_{k}" for k in rng.integers(1, 41, ctrl.sum())]
+    g[~ctrl] = [";".join(x for x in s.split(";") if not x.startswith("NTC_")) or "G1010_g1" for s in g[~ctrl]]
+    ad.obs["guides"] = g
+    C = sp.csr_matrix(ad.layers["counts"]).astype(np.float64)
+    a_cols = [ad.var_names.get_loc(f"G{i:04d}") for i in range(1, 81)]
+    D = sp.diags(np.where(ctrl, 1.3, 1.0))                               # the control population: PROG_A a bit higher
+    C = C.tolil()
+    C[:, a_cols] = np.round((D @ C[:, a_cols]).toarray())
+    C = sp.csr_matrix(C)
+    X = sp.csr_matrix(C.multiply(1e4 / np.asarray(C.sum(1))))
+    X.data = np.log1p(X.data)
+    ad.X, ad.layers["counts"] = X.astype(np.float32), C.astype(np.float32)
+    ad.write_h5ad(tmp_path / "pop.h5ad")
+    cfgp = _config(tmp_path, example_data, file=str(example_data / "programs.gmt"))
+    import yaml
+    c = yaml.safe_load(open(cfgp))
+    c["data"]["h5ad"] = str(tmp_path / "pop.h5ad")
+    c["aucell"]["n_repeats"] = 1
+    c["association"].update(n_perm=200, control_n_perm=200)
+    yaml.safe_dump(c, open(cfgp, "w"))
+    cli.main(["run", cfgp, "--from", "score", "--to", "test"])
+    cs = pd.read_csv(tmp_path / "out" / "3_association" / "controls" / "control_summary.tsv", sep="\t")
+    assert (cs.frac_p_lt_005 <= 0.12).all() and (cs.n_fdr_hits == 0).all(), cs

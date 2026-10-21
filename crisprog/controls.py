@@ -1,8 +1,8 @@
 """Negative-control check: random groups of control guides tested exactly like real units.
 
 Control guides (non-targeting, or safe-targeting e.g. at silent olfactory-receptor promoters) should not move any
-program. Each control unit is a random group of control guides of one type, of the same size as a typical tested
-unit; a cell is 'perturbed' for it if it carries any of those guides. They are fitted with the same covariates,
+program. Each control unit is a random group of control guides of one type with about as many perturbed cells as
+a typical tested unit; a cell is 'perturbed' for it if it carries any of those guides. They are fitted with the same covariates,
 permutation strata and number of guides per unit as the real units.
 
 What it tells you:
@@ -27,34 +27,60 @@ from .model import OLSEngine, permutation_test
 from .utils import benjamini_hochberg, log
 
 
-def build_control_units(A, rows, size, n_units, min_cells, seed):
-    """Random groups of `size` control guides per control type -> (cells x units 0/1 CSR, units DataFrame)."""
+def build_control_units(A, rows, target_cells, n_units, min_cells, seed):
+    """Random groups of control guides of one type, each grown guide by guide until it has about as many
+    perturbed cells as a typical tested unit (target_cells) -> (cells x units 0/1 CSR, units DataFrame).
+    Matching on cells, not guides, keeps control units comparable when control labels differ in size
+    (e.g. one label per safe-targeting gene that pools several guides)."""
     import scipy.sparse as sp
     rng = np.random.default_rng(seed)
     Gc = A.Gc[rows].tocsc()
-    present = np.asarray(Gc.sum(axis=0)).ravel() > 0
+    n = Gc.shape[0]
+    per = np.diff(Gc.indptr)
     cols, defs = [], []
+
+    def grow(order):
+        mask, used = np.zeros(n, bool), []
+        for g in order:
+            used.append(g)
+            mask[Gc.indices[Gc.indptr[g]:Gc.indptr[g + 1]]] = True
+            if mask.sum() >= target_cells:
+                return used, mask
+        return None, None
+
     for typ in sorted(set(A.control_type)):
-        idx = np.flatnonzero((A.control_type == typ) & present)
-        if len(idx) < 2 * size:
-            log(f"control check: {typ}: only {len(idx)} individual control guides; need at least {2 * size} "
-                f"for units of {size} guides - skipped")
+        idx = np.flatnonzero((A.control_type == typ) & (per > 0))
+        cells_typ = int((np.asarray(Gc[:, idx].sum(axis=1)).ravel() > 0).sum()) if len(idx) else 0
+        if cells_typ < 2 * target_cells:
+            log(f"control check: {typ}: {len(idx)} control guides in {cells_typ:,} cells; need at least "
+                f"{2 * target_cells:,} cells for control units of ~{target_cells:,} cells - skipped")
             continue
-        perm = rng.permutation(idx)
-        groups = [perm[k * size:(k + 1) * size] for k in range(len(idx) // size)][:n_units]
-        while len(groups) < n_units:                          # few guides: add overlapping random groups
-            groups.append(rng.choice(idx, size, replace=False))
-        for k, g in enumerate(groups):
-            x = (np.asarray(Gc[:, g].sum(axis=1)).ravel() > 0).astype(np.float64)
-            if min_cells <= x.sum() <= len(x) - min_cells:
+        groups, order, k = [], list(rng.permutation(idx)), 0
+        while order and len(groups) < n_units:                 # disjoint groups first
+            used, mask = grow(order)
+            if used is None:
+                break
+            groups.append((used, mask))
+            order = order[len(used):]
+        n_disjoint = len(groups)
+        while len(groups) < n_units:                            # then overlapping random groups
+            used, mask = grow(rng.permutation(idx))
+            groups.append((used, mask))
+        for used, mask in groups:
+            k += 1
+            x = mask.astype(np.float64)
+            if min_cells <= x.sum() <= n - min_cells:
                 cols.append(sp.csr_matrix(x[:, None]))
-                defs.append((f"{typ}_ctrl{k + 1}", typ, ";".join(A.control_guides[g]), int(x.sum())))
+                defs.append((f"{typ}_ctrl{k}", typ, len(used), ";".join(A.control_guides[used]), int(x.sum())))
+        if n_disjoint < n_units:
+            log(f"control check: {typ}: {n_disjoint} disjoint control units, {n_units - n_disjoint} more drawn "
+                "with overlapping guides")
     if not cols:
         return None, None
-    return sp.hstack(cols).tocsr(), pd.DataFrame(defs, columns=["unit", "type", "guides", "n_perturbed"])
+    return sp.hstack(cols).tocsr(), pd.DataFrame(defs, columns=["unit", "type", "n_guides", "guides", "n_perturbed"])
 
 
-def run_control_check(A, rows, Y, Z, codes, prog_names, a, res, real_sizes, out):
+def run_control_check(A, rows, Y, Z, codes, prog_names, a, res, real_n1, out):
     """Fit control units, write controls/, and add p_vs_controls / beyond_controls to res (returned)."""
     mode = a["control_units"]
     if mode in (False, "false", "no", "none"):
@@ -68,16 +94,20 @@ def run_control_check(A, rows, Y, Z, codes, prog_names, a, res, real_sizes, out)
             raise SystemExit(msg)
         log(msg + " - skipped")
         return res
-    size = int(a["control_unit_size"] or max(1, int(np.median(real_sizes))))
-    Xc, cu = build_control_units(A, rows, size, int(a["n_control_units"]), int(a["min_perturbed"]), a["seed"])
+    target = int(a["control_unit_cells"] or max(int(a["min_perturbed"]), int(np.median(real_n1))))
+    Xc, cu = build_control_units(A, rows, target, int(a["n_control_units"]), int(a["min_perturbed"]), a["seed"])
     if Xc is None:
         log("control check: no control unit could be built - skipped")
         return res
     d = os.path.join(out, "controls")
     os.makedirs(d, exist_ok=True)
-    log(f"control check: {len(cu)} control units of {size} guides "
-        f"({', '.join(f'{k} {v}' for k, v in cu.type.value_counts().items())}); "
-        f"perturbed cells per unit: median {cu.n_perturbed.median():.0f}")
+    log(f"control check: {len(cu)} control units matched to the tested units' median of {target:,} perturbed "
+        f"cells ({', '.join(f'{k} {v}' for k, v in cu.type.value_counts().items())}); perturbed cells per control "
+        f"unit: median {cu.n_perturbed.median():.0f}; control labels per unit: median {cu.n_guides.median():.0f}")
+    sep = np.asarray(A.U[rows][np.asarray(A.Gc[rows].sum(axis=1)).ravel() > 0].sum(axis=1)).ravel()
+    if len(sep) and (sep == 0).all():
+        log("control check: cells with control guides carry no targeting guide (controls are a separate population); "
+            "control units are compared with the other control cells of the same MOI level")
     eng = OLSEngine(Xc, Y, Z)
     beta, se, t, dd = eng.stats()
     with np.errstate(divide="ignore", invalid="ignore"):

@@ -168,7 +168,7 @@ def step_test(cfg, ctx):
     res = res.sort_values(["program", "p_perm", "p_ols"]).reset_index(drop=True)
     res["program"] = res["program"].astype(str)
     from .controls import run_control_check
-    res = run_control_check(A, rows, Y, Z, codes, prog_names, a, res, A.units["n_guides"].to_numpy()[t_idx], out)
+    res = run_control_check(A, rows, Y, Z, codes, prog_names, a, res, n1[t_idx], out)
     res.to_csv(os.path.join(out, "results.tsv"), sep="\t", index=False, na_rep="NA", float_format="%.6g")
     A.units.assign(n_perturbed=n1, tested=tested).to_csv(os.path.join(out, "units.tsv"), sep="\t", index=False)
     pd.DataFrame({"cell": A.cells[rows], **builtin, "stratum": codes}).to_csv(

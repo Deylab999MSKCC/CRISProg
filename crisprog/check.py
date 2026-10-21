@@ -115,16 +115,27 @@ def run_check(cfg, ctx, out):
         types = pd.Series(A.control_type).value_counts().to_dict()
         add("PASS", "controls", f"{nc:,} control guide labels ({', '.join(f'{k}: {v}' for k, v in types.items())}); "
             f"{ctrl_only:,} cells carry only control guides")
-        size = int(a["control_unit_size"] or max(1, int(np.median(A.units["n_guides"]))))
-        small = [k for k, v in types.items() if v < 2 * size]
+        n1u = np.asarray(A.U.sum(axis=0)).ravel()
+        n1u = n1u[n1u >= a["min_perturbed"]]
+        target = int(a["control_unit_cells"] or (np.median(n1u) if len(n1u) else a["min_perturbed"]))
+        Gcc = A.Gc.tocsc()
+        cells_typ = {k: int((np.asarray(Gcc[:, np.flatnonzero(A.control_type == k)].sum(axis=1)).ravel() > 0).sum())
+                     for k in types}
+        small = [k for k, v in cells_typ.items() if v < 2 * target]
         if nc < 4:
             add("WARN", "controls", f"control guides appear merged into {nc} label(s) ({', '.join(A.control_guides[:3])}); "
                 "the negative-control check needs individual control guide calls")
-        elif small:
-            add("WARN", "controls", f"too few individual guides for control units of {size} in: {', '.join(small)}")
         else:
-            add("PASS", "controls", f"negative-control check can run: up to {a['n_control_units']} control units of "
-                f"{size} guides per type")
+            ok = [k for k in types if k not in small]
+            add("PASS" if ok else "WARN", "controls", "negative-control check: " + (
+                f"up to {a['n_control_units']} control units of ~{target:,} perturbed cells per type for "
+                f"{', '.join(ok)}" if ok else "no control type has enough cells")
+                + (f"; too few control cells (< {2 * target:,}) for: {', '.join(small)}" if small else ""))
+        has_ctrl = np.asarray(A.Gc.sum(axis=1)).ravel() > 0
+        if has_ctrl.any() and (np.asarray(A.U[has_ctrl].sum(axis=1)).ravel() == 0).all():
+            add("INFO", "controls", "cells with control guides carry no targeting guide: the controls are a separate "
+                "population (e.g. a single control guide vs several targeting guides per cell). MOI is modeled as "
+                "categories so that control units are compared with control cells of the same MOI")
         if not d["control_types"] and nc >= 4:
             kinds = {"non-targeting": r"non.?target|ntc", "safe-targeting": r"safe|^NC_OR|^OR\d"}
             seen = [k for k, rx in kinds.items() if any(re.search(rx, g, re.I) for g in A.control_guides)]
@@ -169,10 +180,15 @@ def run_check(cfg, ctx, out):
         add("PASS" if frac_kd >= 0.5 else "WARN", "knockdown",
             f"target gene down (t < -2) in {frac_kd:.0%} of tested units with a measured target; median t "
             f"{np.nanmedian(v[test_m]):.1f}. Low values can also mean the target is barely expressed")
-        up = A.units.unit.to_numpy()[tidx][(v > 2) & test_m]
-        if len(up):
-            add("WARN", "knockdown", f"{len(up)} units have their target gene UP (t > 2), which CRISPRi should not "
-                f"do; check the guide -> target map, e.g. {', '.join(up[:8])}")
+        names_t = A.units.unit.to_numpy()[tidx]
+        up2, up4 = names_t[(v > 2) & test_m], names_t[(v > 4) & test_m]
+        if len(up2):
+            add("INFO", "knockdown", f"{len(up2)} units have their target gene up with t > 2 (about "
+                f"{0.023 * int(np.sum(np.abs(v[test_m]) < 2) + len(up2)):.0f} expected by chance among units without "
+                "a detectable knockdown)")
+        if len(up4) >= 3:
+            add("WARN", "knockdown", f"{len(up4)} units have their target gene clearly UP (t > 4), which CRISPRi "
+                f"should not do; check the guide -> target map, e.g. {', '.join(up4[:8])}")
         pc = tidx[ptype[tidx] == "positive control"]
         if len(pc):
             add("PASS" if np.nanmedian(kd[pc]) < -5 else "WARN", "knockdown", "positive controls: "

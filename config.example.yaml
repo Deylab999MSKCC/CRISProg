@@ -55,6 +55,7 @@ covariates:
   - moi
   batch: []
   moi_col: null
+  moi_categorical: auto
 aucell:
   rscript: Rscript
   cores: 1
@@ -72,7 +73,7 @@ association:
   fdr: 0.05
   seed: 1
   control_units: auto
-  control_unit_size: null
+  control_unit_cells: null
   n_control_units: 100
   control_n_perm: 2000
 check:

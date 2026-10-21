@@ -47,6 +47,7 @@ class Analysis:
         self.obs = obs.iloc[np.flatnonzero(keep)].reset_index(drop=True)
         self.cov_names = [] if [c.lower() for c in cv["use"]] == ["none"] else list(cv["use"])
         self.batch_cols = list(cv["batch"])
+        self.moi_categorical = cv["moi_categorical"]
 
         src = self.counts if self.counts is not None else self.X
         if self.counts is None and "log_n_genes" in self.cov_names:
@@ -75,7 +76,7 @@ class Analysis:
         """Covariate matrix, its column names and permutation strata for the cells in rows."""
         obs = self.obs.iloc[rows].reset_index(drop=True)
         builtin = {k: v[rows] for k, v in self.builtin.items()}
-        Z, znames = build_design(self.cov_names, builtin, obs, self.batch_cols)
+        Z, znames = build_design(self.cov_names, builtin, obs, self.batch_cols, self.moi_categorical)
         depth = next((c for c in self.cov_names if c in DEPTH), None)
         batch = obs[self.batch_cols].astype(str).agg("|".join, axis=1).to_numpy() if self.batch_cols else None
         codes = make_strata(builtin["moi"] if "moi" in self.cov_names else None,

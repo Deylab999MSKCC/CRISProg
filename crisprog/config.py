@@ -63,7 +63,9 @@ DEFAULTS = {
             "seed": 0,
         },
     },
-    "covariates": {"use": ["log_n_genes", "moi"], "batch": [], "moi_col": None},
+    "covariates": {"use": ["log_n_genes", "moi"], "batch": [], "moi_col": None,
+                   "moi_categorical": "auto"},   # auto: MOI as categories (one level per guide count) when it
+                                                 # takes few integer values; true | false
     "aucell": {"rscript": "Rscript", "cores": 1, "max_rank": None, "rankings_cache": None,
                "seed": None,                # tie-breaking seed (default: association.seed)
                "n_repeats": 5},             # average the AUC over this many tie-breaking seeds (1 = fastest)
@@ -71,7 +73,8 @@ DEFAULTS = {
                     "fdr_scope": "program", "fdr": 0.05, "seed": 1,
                     # negative-control check: random groups of control guides tested like real units
                     "control_units": "auto",      # auto (when individual control guides exist) | true | false
-                    "control_unit_size": None,    # guides per control unit; default: median guides per tested unit
+                    "control_unit_cells": None,   # perturbed cells per control unit; default: the median of the
+                                                  # tested units (guides are added until a unit has this many)
                     "n_control_units": 100,       # per control type
                     "control_n_perm": 2000},
     "check": {"review": "none",           # none | claude-code | api: an AI reads check_report.md and comments
