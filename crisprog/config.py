@@ -64,7 +64,11 @@ DEFAULTS = {
         },
     },
     "covariates": {"use": ["log_n_genes", "moi"], "batch": [], "moi_col": None,
-                   "moi_categorical": "auto"},   # auto: MOI as categories (one level per guide count) when it
+                   "moi_categorical": "auto",
+                   # number of control guides per cell as a covariate (categories), so every comparison is between
+                   # cells with the same number of detected guides in total; auto = when control guides share
+                   # cells with targeting guides (guide detection can depend on cell state) | true | false
+                   "control_count": "auto"},   # auto: MOI as categories (one level per guide count) when it
                                                  # takes few integer values; true | false
     "aucell": {"rscript": "Rscript", "cores": 1, "max_rank": None, "rankings_cache": None,
                "seed": None,                # tie-breaking seed (default: association.seed)

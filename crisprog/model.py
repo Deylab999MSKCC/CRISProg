@@ -20,7 +20,7 @@ from scipy import stats
 
 from .utils import log, natural_key
 
-BUILTIN = ("log_n_genes", "log_total_counts", "moi")
+BUILTIN = ("log_n_genes", "log_total_counts", "moi", "n_control")
 DEPTH = ("log_n_genes", "log_total_counts")
 
 
@@ -60,6 +60,12 @@ def build_design(names, builtin, obs, batch=(), moi_categorical="auto"):
     n = len(obs)
     cols, znames = [np.ones(n)], ["intercept"]
     for nm in names:
+        if nm == "n_control" and nm in builtin:              # always categories
+            lv = moi_levels(builtin[nm])
+            c, cn = _dummies(lv if lv is not None else np.round(builtin[nm]), "n_control")
+            cols += c
+            znames += cn
+            continue
         if nm == "moi" and moi_categorical not in (False, "false", "no") and nm in builtin:
             lv = moi_levels(builtin[nm])
             if lv is not None and len(np.unique(lv)) > 1:

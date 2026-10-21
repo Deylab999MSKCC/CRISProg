@@ -23,7 +23,7 @@ class Analysis:
             raise SystemExit("cell names (obs_names) are not unique; run adata.obs_names_make_unique() first")
         if d["guide_col"] not in obs.columns:
             raise SystemExit(f"data.guide_col '{d['guide_col']}' is not an obs column")
-        G, guides, has_call, _, Gc, cguides = parse_guides(obs[d["guide_col"]].astype(object).to_numpy(), d["guide_sep"],
+        G, guides, has_call, n_control, Gc, cguides = parse_guides(obs[d["guide_col"]].astype(object).to_numpy(), d["guide_sep"],
                                               d["controls"], d["control_pattern"])
         keep = np.ones(len(cells), dtype=bool) if d["keep_cells_without_guides"] else has_call
         if not d["keep_cells_without_guides"] and (~has_call).any():
@@ -46,6 +46,15 @@ class Analysis:
         self.counts = counts[keep] if counts is not None else None
         self.obs = obs.iloc[np.flatnonzero(keep)].reset_index(drop=True)
         self.cov_names = [] if [c.lower() for c in cv["use"]] == ["none"] else list(cv["use"])
+        nctl = n_control[keep].astype(float)
+        moi_k = np.diff(G[keep].indptr)
+        shared = bool(((nctl > 0) & (moi_k > 0)).any())
+        cc = cv["control_count"]
+        if (cc in (True, "true") or (cc == "auto" and shared)) and "n_control" not in self.cov_names \
+                and len(np.unique(nctl)) > 1:
+            self.cov_names.append("n_control")
+            log("covariate n_control (control guides per cell, as categories) added: control guides share cells with "
+                "targeting guides, so cells are compared at the same total number of detected guides")
         self.batch_cols = list(cv["batch"])
         self.moi_categorical = cv["moi_categorical"]
 
@@ -55,7 +64,8 @@ class Analysis:
         n_genes = np.asarray((src > 0).sum(axis=1)).ravel()
         self.builtin = {"log_n_genes": np.log(np.maximum(n_genes, 1)),
                         "moi": (self.obs[cv["moi_col"]].to_numpy(dtype=float) if cv["moi_col"]
-                                else np.diff(G[keep].indptr).astype(float))}
+                                else np.diff(G[keep].indptr).astype(float)),
+                        "n_control": nctl}
         if self.counts is not None:
             self.builtin["log_total_counts"] = np.log(np.maximum(np.asarray(self.counts.sum(axis=1)).ravel(), 1))
         elif "log_total_counts" in self.cov_names:
@@ -79,9 +89,15 @@ class Analysis:
         Z, znames = build_design(self.cov_names, builtin, obs, self.batch_cols, self.moi_categorical)
         depth = next((c for c in self.cov_names if c in DEPTH), None)
         batch = obs[self.batch_cols].astype(str).agg("|".join, axis=1).to_numpy() if self.batch_cols else None
-        codes = make_strata(builtin["moi"] if "moi" in self.cov_names else None,
+        mkey = builtin["moi"] if "moi" in self.cov_names else None
+        if "n_control" in self.cov_names:                  # strata keep both guide counts fixed
+            from .model import moi_levels
+            nc = moi_levels(builtin["n_control"])
+            mkey = (np.round(mkey).astype(int) * 1000 if mkey is not None else 0) + (nc if nc is not None else 0)
+        codes = make_strata(mkey,
                             builtin[depth] if depth else None, batch, self.depth_bins, len(rows))
         strata = " x ".join((["MOI"] if "moi" in self.cov_names else [])
+                            + (["control guides"] if "n_control" in self.cov_names else [])
                             + ([f"{self.depth_bins} {depth} bins"] if depth else [])
                             + (["batch"] if self.batch_cols else [])) or "none (plain shuffles)"
         return Z, znames, codes, strata, builtin

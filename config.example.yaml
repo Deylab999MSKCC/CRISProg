@@ -56,6 +56,7 @@ covariates:
   batch: []
   moi_col: null
   moi_categorical: auto
+  control_count: auto
 aucell:
   rscript: Rscript
   cores: 1

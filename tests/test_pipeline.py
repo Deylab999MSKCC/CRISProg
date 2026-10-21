@@ -213,8 +213,9 @@ def test_suffixed_target_names(tmp_path, example_data):
 
 @needs_r
 def test_control_check_detects_confounding(tmp_path, example_data):
-    """If control guides are detected mostly in cells with high PROG_A activity, control units become
-    'significant' for PROG_A: the check sees confounding that the permutation null cannot."""
+    """If some control guides (NTC_1-20) are detected mostly in cells with high PROG_A activity, control units of
+    those guides become 'significant' for PROG_A: the check sees confounding that the permutation null cannot.
+    (A bias shared by all control guides is absorbed by the n_control covariate, see the next test.)"""
     import anndata
     from crisprog import cli
     ad = anndata.read_h5ad(example_data / "example.h5ad")
@@ -224,7 +225,7 @@ def test_control_check_detects_confounding(tmp_path, example_data):
     low = score < np.median(score)
     g = ad.obs["guides"].astype(str).to_numpy()
     for i in np.flatnonzero(low & (rng.random(len(g)) < 0.8)):
-        g[i] = ";".join(x for x in g[i].split(";") if not x.startswith("NTC_"))
+        g[i] = ";".join(x for x in g[i].split(";") if not (x.startswith("NTC_") and int(x[4:]) <= 20))
     ad.obs["guides"] = g
     ad.write_h5ad(tmp_path / "confounded.h5ad")
     cfgp = _config(tmp_path, example_data, file=str(example_data / "programs.gmt"))
@@ -233,11 +234,12 @@ def test_control_check_detects_confounding(tmp_path, example_data):
     c["data"]["h5ad"] = str(tmp_path / "confounded.h5ad")
     c["aucell"]["n_repeats"] = 1
     c["association"].update(n_perm=200, control_n_perm=200)
+    c["data"]["control_types"] = {"biased": "^NTC_([1-9]|1[0-9]|20)$", "clean": "^NTC_(2[1-9]|3[0-9]|40)$"}
     yaml.safe_dump(c, open(cfgp, "w"))
     cli.main(["run", cfgp, "--from", "score", "--to", "test"])
     cs = pd.read_csv(tmp_path / "out" / "3_association" / "controls" / "control_summary.tsv", sep="\t")
-    fr = dict(zip(cs.program, cs.frac_p_lt_005))
-    assert fr["PROG_A"] > 0.3, fr
+    fr = {(r.program, r.type): r.frac_p_lt_005 for r in cs.itertuples()}
+    assert fr[("PROG_A", "biased")] > 0.3, fr
 
 
 def test_config_free_form_control_types(tmp_path):
@@ -284,3 +286,31 @@ def test_control_population_categorical_moi(tmp_path, example_data):
     cli.main(["run", cfgp, "--from", "score", "--to", "test"])
     cs = pd.read_csv(tmp_path / "out" / "3_association" / "controls" / "control_summary.tsv", sep="\t")
     assert (cs.frac_p_lt_005 <= 0.12).all() and (cs.n_fdr_hits == 0).all(), cs
+
+
+@needs_r
+def test_control_count_covariate_absorbs_detection_bias(tmp_path, example_data):
+    """CM-like: all control guides detected more often in cells with high PROG_A (guide detection depends on cell
+    state). Comparing cells at the same number of control guides (n_control covariate) keeps control units null."""
+    import anndata
+    from crisprog import cli
+    ad = anndata.read_h5ad(example_data / "example.h5ad")
+    score = np.asarray(ad[:, [f"G{i:04d}" for i in range(1, 81)]].X.mean(axis=1)).ravel()
+    rng = np.random.default_rng(0)
+    g = ad.obs["guides"].astype(str).to_numpy()
+    for i in np.flatnonzero((score < np.median(score)) & (rng.random(len(g)) < 0.8)):
+        g[i] = ";".join(x for x in g[i].split(";") if not x.startswith("NTC_"))
+    ad.obs["guides"] = g
+    ad.write_h5ad(tmp_path / "det.h5ad")
+    cfgp = _config(tmp_path, example_data, file=str(example_data / "programs.gmt"))
+    import yaml
+    c = yaml.safe_load(open(cfgp))
+    c["data"]["h5ad"] = str(tmp_path / "det.h5ad")
+    c["aucell"]["n_repeats"] = 1
+    c["association"].update(n_perm=200, control_n_perm=200)
+    yaml.safe_dump(c, open(cfgp, "w"))
+    cli.main(["run", cfgp, "--from", "score", "--to", "test"])
+    cs = pd.read_csv(tmp_path / "out" / "3_association" / "controls" / "control_summary.tsv", sep="\t")
+    assert (cs.frac_p_lt_005 <= 0.12).all(), cs
+    info = __import__("json").load(open(tmp_path / "out" / "3_association" / "run_info.json"))
+    assert any(d.startswith("n_control") for d in info["design"])
