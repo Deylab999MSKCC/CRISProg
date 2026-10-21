@@ -13,8 +13,8 @@ from .model import OLSEngine, permutation_test
 from .plots import volcano
 from .utils import benjamini_hochberg, log
 
-STEPS = ["programs", "score", "test", "genes", "enrich", "annotate"]
-DIRS = {"programs": "1_programs", "score": "2_scores", "test": "3_association", "genes": "4_gene_test",
+STEPS = ["check", "programs", "score", "test", "genes", "enrich", "annotate"]
+DIRS = {"check": "0_check", "programs": "1_programs", "score": "2_scores", "test": "3_association", "genes": "4_gene_test",
         "enrich": "5_enrichment", "annotate": "6_annotation"}
 
 
@@ -49,6 +49,11 @@ class Context:
 
 
 # ---------------------------------------------------------------------------------------------------------------
+def step_check(cfg, ctx):
+    from .check import run_check
+    run_check(cfg, ctx, outdir(cfg, "check"))
+
+
 def step_programs(cfg, ctx):
     if cfg["programs"]["file"]:
         log(f"programs given in {cfg['programs']['file']}; discovery skipped")
@@ -148,7 +153,8 @@ def step_test(cfg, ctx):
     tl = [s.split(";") if s else [] for s in A.units["target_genes"]]   # measured genes behind the targets
     members = [[";".join(x for x in ts if x in prog_sets[p]) for p in prog_names] for ts in tl]
     res = pd.DataFrame({
-        "unit": np.repeat(A.units["unit"].to_numpy(), P), "program": np.tile(prog_names, E),
+        "unit": np.repeat(A.units["unit"].to_numpy(), P), "unit_type": np.repeat(A.units["unit_type"].to_numpy(), P),
+        "program": np.tile(prog_names, E),
         "n_perturbed": np.repeat(n1, P), "beta": full(beta).ravel(), "se": full(se).ravel(), "t": full(t).ravel(),
         "effect_sd": full(effect_sd).ravel(), "p_ols": full(p_ols).ravel(), "p_perm": full(p_perm).ravel(),
         "fdr": full(fdr).ravel(),
@@ -161,6 +167,8 @@ def step_test(cfg, ctx):
     res["program"] = pd.Categorical(res["program"], prog_names)
     res = res.sort_values(["program", "p_perm", "p_ols"]).reset_index(drop=True)
     res["program"] = res["program"].astype(str)
+    from .controls import run_control_check
+    res = run_control_check(A, rows, Y, Z, codes, prog_names, a, res, A.units["n_guides"].to_numpy()[t_idx], out)
     res.to_csv(os.path.join(out, "results.tsv"), sep="\t", index=False, na_rep="NA", float_format="%.6g")
     A.units.assign(n_perturbed=n1, tested=tested).to_csv(os.path.join(out, "units.tsv"), sep="\t", index=False)
     pd.DataFrame({"cell": A.cells[rows], **builtin, "stratum": codes}).to_csv(
@@ -181,7 +189,9 @@ def step_test(cfg, ctx):
     hits = res[res["fdr"] < a["fdr"]]
     log(f"{len(hits)} unit-program associations at FDR < {a['fdr']:g}")
     if len(hits):
-        print(hits[["unit", "program", "n_perturbed", "effect_sd", "p_perm", "fdr", "target_in_program"]]
+        cols = ["unit", "unit_type", "program", "n_perturbed", "effect_sd", "p_perm", "fdr", "target_in_program"]
+        cols += [c for c in ("beyond_controls",) if c in hits.columns]
+        print(hits[cols]
               .to_string(index=False, float_format=lambda x: f"{x:.3g}"), flush=True)
     return res
 
@@ -201,5 +211,5 @@ def step_annotate(cfg, ctx):
     run_annotation(cfg, outdir(cfg, "annotate"))
 
 
-RUNNERS = {"programs": step_programs, "score": step_score, "test": step_test, "genes": step_genes,
+RUNNERS = {"check": step_check, "programs": step_programs, "score": step_score, "test": step_test, "genes": step_genes,
            "enrich": step_enrich, "annotate": step_annotate}

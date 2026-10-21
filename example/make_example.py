@@ -15,7 +15,7 @@ Planted effects (everything else is null):
   G0900 knockdown  lowers PROG_B activity 0.8x
 120 other targets (G1001-G1120, 2 guides each) have no trans effect; every target's own expression drops.
 Also included: guides E01_g1/E01_g2 hit two genes (G1500, G1501) -> tested once as 'G1500/G1501';
-control guides NTC_1..NTC_6; one guide (X_g1) without a target; 2% of cells without a guide call.
+control guides NTC_1..NTC_40; one guide (X_g1) without a target; 2% of cells without a guide call.
 """
 import argparse
 import os
@@ -43,7 +43,7 @@ def main(argv=None):
     targets = ["G0005", "G0900"] + [f"G{i:04d}" for i in range(1001, 1121)]
     tmap = [(f"{t}_g{k}", t) for t in targets for k in (1, 2)]
     tmap += [("E01_g1", "G1500"), ("E01_g2", "G1500"), ("E01_g1", "G1501"), ("E01_g2", "G1501")]
-    controls = [f"NTC_{k}" for k in range(1, 7)]
+    controls = [f"NTC_{k}" for k in range(1, 41)]
     library = sorted({g for g, _ in tmap}) + controls + ["X_g1"]
 
     # guides per cell (high MOI)

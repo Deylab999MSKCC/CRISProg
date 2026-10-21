@@ -21,6 +21,9 @@ DEFAULTS = {
         "guide_sep": ";",
         "controls": [],                    # control guide labels (not tested, not counted in MOI)
         "control_pattern": None,           # regex for control guides
+        "control_types": {},               # {type: regex} to split the negative controls, e.g.
+                                           # {non-targeting: '^NC_non-targeting', safe-targeting: '^NC_OR'}
+        "positive_controls": [],           # targets that are positive controls (knockdown controls, not TFs)
         "target_map": None,                # TSV guide<TAB>target; null = every guide is tested on its own
         "merge_identical_targets": True,
         "keep_cells_without_guides": False,
@@ -65,7 +68,14 @@ DEFAULTS = {
                "seed": None,                # tie-breaking seed (default: association.seed)
                "n_repeats": 5},             # average the AUC over this many tie-breaking seeds (1 = fastest)
     "association": {"min_perturbed": 10, "n_perm": 10000, "perm_p": "auto", "pool_bins": 5, "depth_bins": 10,
-                    "fdr_scope": "program", "fdr": 0.05, "seed": 1},
+                    "fdr_scope": "program", "fdr": 0.05, "seed": 1,
+                    # negative-control check: random groups of control guides tested like real units
+                    "control_units": "auto",      # auto (when individual control guides exist) | true | false
+                    "control_unit_size": None,    # guides per control unit; default: median guides per tested unit
+                    "n_control_units": 100,       # per control type
+                    "control_n_perm": 2000},
+    "check": {"review": "none",           # none | claude-code | api: an AI reads check_report.md and comments
+              "strict": False},           # stop the run when a check FAILs
     "gene_test": {"fdr": 0.05, "n_null": 20, "chunk": 2000, "seed": 1},
     "enrichment": {"backend": "enrichr",   # enrichr (web, default) | gmt (local files)
                    "libraries": ["GO_Biological_Process", "Reactome_Pathways", "KEGG", "WikiPathways_Human",

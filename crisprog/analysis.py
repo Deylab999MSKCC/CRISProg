@@ -1,4 +1,6 @@
 """The analysis data, loaded once and shared by the scoring, association and per-gene steps."""
+import re
+
 import numpy as np
 
 from .data import add_target_genes, build_units, load_h5ad, parse_guides, read_target_map
@@ -21,7 +23,7 @@ class Analysis:
             raise SystemExit("cell names (obs_names) are not unique; run adata.obs_names_make_unique() first")
         if d["guide_col"] not in obs.columns:
             raise SystemExit(f"data.guide_col '{d['guide_col']}' is not an obs column")
-        G, guides, has_call, _ = parse_guides(obs[d["guide_col"]].astype(object).to_numpy(), d["guide_sep"],
+        G, guides, has_call, _, Gc, cguides = parse_guides(obs[d["guide_col"]].astype(object).to_numpy(), d["guide_sep"],
                                               d["controls"], d["control_pattern"])
         keep = np.ones(len(cells), dtype=bool) if d["keep_cells_without_guides"] else has_call
         if not d["keep_cells_without_guides"] and (~has_call).any():
@@ -31,6 +33,15 @@ class Analysis:
         self.U, self.units = build_units(G[keep], guides, tmap, merge_identical=d["merge_identical_targets"])
         self.cells, self.genes = cells[keep], genes
         self.units = add_target_genes(self.units, genes)
+        pos = {x.strip() for x in d["positive_controls"]}
+        self.units["unit_type"] = ["positive control" if pos & set(f"{t};{g}".split(";")) else "test"
+                                   for t, g in zip(self.units["targets"].fillna(""), self.units["target_genes"])]
+        if pos:
+            log(f"positive-control units: {', '.join(self.units.unit[self.units.unit_type != 'test']) or 'none found'}")
+        self.Gc, self.control_guides = Gc[keep], cguides           # negative-control guides (not tested as units)
+        types = d["control_types"] or {}
+        self.control_type = np.array([next((k for k, rx in types.items() if re.search(rx, g)), "control")
+                                      for g in cguides], dtype=object)
         self.X = X[keep]
         self.counts = counts[keep] if counts is not None else None
         self.obs = obs.iloc[np.flatnonzero(keep)].reset_index(drop=True)

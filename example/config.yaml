@@ -6,7 +6,7 @@ data:
   h5ad: ../data/example/example.h5ad
   counts_layer: counts
   guide_col: guides
-  controls: [NTC_1, NTC_2, NTC_3, NTC_4, NTC_5, NTC_6]
+  control_pattern: "^NTC_"                 # 40 non-targeting guides
   target_map: ../data/example/guide_targets.tsv
 
 programs:

@@ -80,7 +80,7 @@ def _config(tmp_path, data, **programs):
     import yaml
     cfg = {"name": "out", "results_dir": str(tmp_path),
            "data": {"h5ad": str(data / "example.h5ad"), "counts_layer": "counts", "guide_col": "guides",
-                    "controls": [f"NTC_{k}" for k in range(1, 7)], "target_map": str(data / "guide_targets.tsv")},
+                    "control_pattern": "^NTC_", "target_map": str(data / "guide_targets.tsv")},
            "programs": programs, "covariates": {"batch": ["batch"]}, "association": {"n_perm": 500},
            "aucell": {"n_repeats": 2},
            "enrichment": {"backend": "gmt", "gmt": []}}
@@ -121,6 +121,12 @@ def test_given_programs_end_to_end(tmp_path, example_data):
     assert b2.changed_in_program >= 5 and b2.down == b2.changed_in_program   # broad, concordant trans effect
     gcal = pd.read_csv(out / "4_gene_test" / "calibration.tsv", sep="\t")
     assert gcal["frac_p_lt_0.05"].between(0.02, 0.09).all()
+    assert (out / "0_check" / "check_report.md").exists()                # data check ran first
+    qc = pd.read_csv(out / "0_check" / "unit_qc.tsv", sep="\t")
+    assert (qc.target_t < -2).mean() > 0.9                                 # simulated knockdown is detected
+    cs = pd.read_csv(out / "3_association" / "controls" / "control_summary.tsv", sep="\t")
+    assert (cs.n_fdr_hits == 0).all() and (cs.frac_p_lt_005 <= 0.12).all()  # control units are null
+    assert bool(a.beyond_controls) and bool(b.beyond_controls)
 
 
 def _recovered(P):
@@ -203,3 +209,32 @@ def test_suffixed_target_names(tmp_path, example_data):
     summ = pd.read_csv(tmp_path / "out" / "4_gene_test" / "program_summary.tsv", sep="\t")
     s = summ[(summ.unit == "G0005_P2") & (summ.program == "PROG_A")].iloc[0]
     assert str(s.target_t).startswith("G0005:")
+
+
+@needs_r
+def test_control_check_detects_confounding(tmp_path, example_data):
+    """If control guides are detected mostly in cells with high PROG_A activity, control units become
+    'significant' for PROG_A: the check sees confounding that the permutation null cannot."""
+    import anndata
+    from crisprog import cli
+    ad = anndata.read_h5ad(example_data / "example.h5ad")
+    a_genes = [f"G{i:04d}" for i in range(1, 81)]
+    score = np.asarray(ad[:, a_genes].X.mean(axis=1)).ravel()
+    rng = np.random.default_rng(0)
+    low = score < np.median(score)
+    g = ad.obs["guides"].astype(str).to_numpy()
+    for i in np.flatnonzero(low & (rng.random(len(g)) < 0.8)):
+        g[i] = ";".join(x for x in g[i].split(";") if not x.startswith("NTC_"))
+    ad.obs["guides"] = g
+    ad.write_h5ad(tmp_path / "confounded.h5ad")
+    cfgp = _config(tmp_path, example_data, file=str(example_data / "programs.gmt"))
+    import yaml
+    c = yaml.safe_load(open(cfgp))
+    c["data"]["h5ad"] = str(tmp_path / "confounded.h5ad")
+    c["aucell"]["n_repeats"] = 1
+    c["association"].update(n_perm=200, control_n_perm=200)
+    yaml.safe_dump(c, open(cfgp, "w"))
+    cli.main(["run", cfgp, "--from", "score", "--to", "test"])
+    cs = pd.read_csv(tmp_path / "out" / "3_association" / "controls" / "control_summary.tsv", sep="\t")
+    fr = dict(zip(cs.program, cs.frac_p_lt_005))
+    assert fr["PROG_A"] > 0.3, fr

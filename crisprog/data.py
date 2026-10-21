@@ -53,11 +53,13 @@ def read_programs(path):
 def parse_guides(values, sep=";", controls=(), control_pattern=None):
     """One obs value per cell, e.g. 'GENE1-0--1;GENE2-1-112' (empty/NaN = no guide call).
 
-    Control guides (exact labels, or matching the regex) are not tested and do not count
-    towards MOI; their cells stay in the analysis as unperturbed for every tested unit.
+    Control guides (exact labels, or matching the regex) are not tested as units and do not count
+    towards MOI; their cells stay in the analysis as unperturbed for every tested unit. They are kept
+    separately for the negative-control check.
 
     -> G (cells x guides CSR 0/1, non-control guides), guide names,
-       has_call (cell has any guide call), n_control (control guides per cell)
+       has_call (cell has any guide call), n_control (control guides per cell),
+       Gc (cells x control guides CSR 0/1), control guide names
     """
     ctrl = {c.strip() for c in controls if c.strip()}
     ctrl_re = re.compile(control_pattern) if control_pattern else None
@@ -65,6 +67,7 @@ def parse_guides(values, sep=";", controls=(), control_pattern=None):
     has_call = np.zeros(n, dtype=bool)
     n_control = np.zeros(n, dtype=np.int64)
     gidx, rows, cols = {}, [], []
+    cidx, crows, ccols = {}, [], []
     for i, v in enumerate(values):
         if v is None or (isinstance(v, float) and np.isnan(v)):
             continue
@@ -75,16 +78,20 @@ def parse_guides(values, sep=";", controls=(), control_pattern=None):
         for g in dict.fromkeys(x.strip() for x in s.split(sep) if x.strip()):
             if g in ctrl or (ctrl_re is not None and ctrl_re.search(g)):
                 n_control[i] += 1
+                crows.append(i)
+                ccols.append(cidx.setdefault(g, len(cidx)))
                 continue
             rows.append(i)
             cols.append(gidx.setdefault(g, len(gidx)))
     guides = np.array(list(gidx), dtype=object)
+    cguides = np.array(list(cidx), dtype=object)
     G = sp.csr_matrix((np.ones(len(rows), dtype=np.float32), (rows, cols)), shape=(n, len(guides)))
+    Gc = sp.csr_matrix((np.ones(len(crows), dtype=np.float32), (crows, ccols)), shape=(n, len(cguides)))
     log(f"guide calls: {has_call.sum():,} of {n:,} cells have one; {len(guides):,} distinct non-control "
-        f"guides; {int((n_control > 0).sum()):,} cells carry a control guide")
+        f"guides; {len(cguides):,} distinct control guides, carried by {int((n_control > 0).sum()):,} cells")
     if (ctrl or ctrl_re) and not n_control.any():
         log("WARNING: no control guide matched the given labels/pattern; check --controls / --control-pattern")
-    return G, guides, has_call, n_control
+    return G, guides, has_call, n_control, Gc, cguides
 
 
 def read_target_map(path):

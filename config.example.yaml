@@ -12,6 +12,8 @@ data:
   guide_sep: ;
   controls: []
   control_pattern: null
+  control_types: {}
+  positive_controls: []
   target_map: null
   merge_identical_targets: true
   keep_cells_without_guides: false
@@ -69,6 +71,13 @@ association:
   fdr_scope: program
   fdr: 0.05
   seed: 1
+  control_units: auto
+  control_unit_size: null
+  n_control_units: 100
+  control_n_perm: 2000
+check:
+  review: none
+  strict: false
 gene_test:
   fdr: 0.05
   n_null: 20

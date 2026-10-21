@@ -3,11 +3,14 @@
 CRISProg: which perturbations in a single-cell CRISPR screen drive which gene programs, and what that means.
 
 Steps (outputs in results/<name>/<n>_<step>/):
+  check      data check before anything runs: normalization, guides and MOI, controls, cells per unit, target
+             genes and knockdown, batches, program coverage (PASS/WARN/FAIL report; optional AI review)
   programs   discover gene programs with Hotspot and/or hdWGCNA (both on a PCA)
              (or take a program file you give in the config)
   score      AUCell score of every program in every cell (Bioconductor AUCell, run through R)
   test       program score ~ perturbed + covariates for every perturbation x program, stratified
-             permutation p-values, FDR within each program
+             permutation p-values, FDR within each program; negative-control check (random groups of
+             control guides tested the same way) when individual control guides exist
   genes      for the significant perturbations: the same model on every gene's expression, per-program
              heatmaps, and how concentrated the changes are in each program
   enrich     pathway enrichment of the programs and of each regulator's changed program genes
@@ -18,6 +21,7 @@ Steps (outputs in results/<name>/<n>_<step>/):
 Usage:
   python crisprog.py run config.yaml                  # all steps
   python crisprog.py run config.yaml --from test      # resume from a step
+  python crisprog.py run config.yaml --steps check,test,genes,enrich,annotate   # chosen steps
   python crisprog.py score config.yaml                # a single step
 See config.example.yaml and README.md.
 """

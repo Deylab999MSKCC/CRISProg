@@ -6,9 +6,10 @@ Each perturbation changes downstream (trans) genes only a little, and testing ev
 
 | Step | What it does | Output folder |
 |---|---|---|
+| `check` | **Data check** before anything runs: is `.X` normalized, are raw counts there, guide format and MOI, which controls were found and whether the negative-control check can run, cells per unit, whether target names match measured genes, **knockdown of every target**, batch structure, program coverage. PASS/WARN/FAIL report; optional AI review | `0_check/` |
 | `programs` | Discovers programs with **Hotspot** and/or **hdWGCNA** (both on a PCA of the cells), or takes programs you give it | `1_programs/` |
 | `score` | Scores every program in every cell with **AUCell** (Bioconductor, run through R); ranks each program's genes by their correlation with its score (hub genes) | `2_scores/` |
-| `test` | `program score ~ perturbed + covariates` for every perturbation × program; stratified-permutation P-values; FDR within each program | `3_association/` |
+| `test` | `program score ~ perturbed + covariates` for every perturbation × program; stratified-permutation P-values; FDR within each program; **negative-control check** (random groups of control guides tested the same way) | `3_association/` |
 | `genes` | For the significant perturbations: the same model on every gene; per-program heatmaps; how broad and how concentrated each effect is; flags | `4_gene_test/` |
 | `enrich` | Pathway enrichment of the programs and of each regulator's changed program genes (**Enrichr** with your background; local GMT files as option/fallback) | `5_enrichment/` |
 | `annotate` | **Claude** interprets everything, with literature support, into a report | `6_annotation/` |
@@ -40,6 +41,7 @@ Everything is set in one YAML config (`config.example.yaml` lists every option w
 ```bash
 python crisprog.py run config.yaml                 # all steps
 python crisprog.py run config.yaml --from test     # resume from a step
+python crisprog.py run config.yaml --steps check,test,genes,enrich,annotate   # chosen steps
 python crisprog.py genes config.yaml               # one step
 ```
 
@@ -52,7 +54,9 @@ python crisprog.py genes config.yaml               # one step
 | Analysis data | `data.h5ad` | `.X` = **normalized** expression (e.g. log1p CP10k), not scaled; unique cell names |
 | Raw counts | `data.counts_layer` | Layer with raw counts. Needed for program discovery; recommended for the depth covariates |
 | Guides per cell | `data.guide_col` | obs column listing each cell's guides, e.g. `g1;g2;g3` (`data.guide_sep`). Empty = no guide call |
-| Control guides | `data.controls`, `data.control_pattern` | Labels and/or a regex. Controls are not tested and don't count towards MOI |
+| Control guides | `data.controls`, `data.control_pattern` | Labels and/or a regex. Controls are not tested as units and don't count towards MOI; they are used for the negative-control check |
+| Control types | `data.control_types` | Optional `{type: regex}` to check kinds of negative controls separately, e.g. `{non-targeting: '^NTC', safe-targeting: '^OR'}` |
+| Positive controls | `data.positive_controls` | Optional list of targets that are knockdown controls (e.g. `B2M`, `CD81`); labelled in the results and reported separately |
 | Guide → target | `data.target_map` | Optional TSV with columns `guide`, `target`. Without it every guide is tested on its own; with it, guides are grouped by target, and targets with identical guides are tested once (`A/B`) |
 | Programs | `programs.file` | Optional `.gmt` or TSV (`program`, `gene`). Without it, programs are discovered |
 | Enrichment background | `programs.background` | Optional gene list (one per line) for enriching given programs, e.g. the genes the programs were built from. Default: all measured genes |
@@ -60,6 +64,10 @@ python crisprog.py genes config.yaml               # one step
 | Context | `annotation.context` | A few sentences on the experiment for the AI step: cell type, perturbation type, the question |
 
 ## Method details
+
+**Data check.** The first step loads the data with the config's settings and checks what can go wrong silently: raw counts in `.X` instead of normalized values (FAIL), Ensembl IDs instead of symbols, guides per cell, control guides (none, merged into one label, or individual), units with too few cells, target names that do not match a measured gene (names like `POU5F1_P2` or `ADNP2_-_77867536.23-P1P2-1` are matched after removing promoter/guide suffixes), and whether each target is actually knocked down: the t of its own gene in perturbed vs other cells, with the same covariates as the main test. Targets that go *up* point to a wrong guide → target map. It also lists obs columns that look like unused batches. `check.strict: true` stops the run on a FAIL; `check.review: claude-code` (or `api`) adds `review.md`, an AI reading of the report with suggested config changes.
+
+**Negative-control check.** The permutation null shows the test is right if guide assignment were random given the covariates, but it cannot see confounding such as guides being detected more easily in one cell state. Negative-control guides can: CRISProg forms random groups of control guides of each type (as many guides as a typical unit) and tests them exactly like real units. If more than ~5% of them reach p < 0.05 in a program, or any reaches FDR < 0.05, part of that program's signal is not specific to the targets (the log warns). Each real association gets `p_vs_controls` (share of control units with an effect at least as large) and `beyond_controls` (|effect| above the 99th percentile of control effects). This needs individual control guide calls; a single merged `control` label cannot be split, and the check reports that.
 
 **Program discovery.** Both methods start from the same PCA of the discovery cells (normalize, log, highly variable genes, scale, 30 PCs), and each module they return is a program: a discrete gene set, which is what AUCell needs. Methods that give continuous gene weights (e.g. NMF/cNMF spectra) are not used, because there is no natural cutoff for membership.
 - **Hotspot** (`hotspot`) builds a cell kNN graph on the PCA, finds genes whose expression is locally autocorrelated on it, and groups the top autocorrelated genes into modules by their pairwise local correlations. Hotspot has no embedding of its own, so the PCA is required. Programs are named `Hotspot-1, -2, …`; genes are ranked by autocorrelation Z.
@@ -109,7 +117,9 @@ The output is checked for completeness (all required sections, a minimum length)
 |---|---|
 | `1_programs/programs.tsv`, `.gmt`, `programs_summary.tsv` | Discovered programs (gene, rank, method, score) |
 | `2_scores/aucell_scores.tsv`, `program_gene_ranking.tsv` | Cells × programs scores; hub genes per program |
-| `3_association/results.tsv`, `volcano.pdf`, `calibration.tsv` | All unit × program tests |
+| `0_check/check_report.md`, `unit_qc.tsv` (+ `review.md`) | Data check; per-unit cells, knockdown t, batch share |
+| `3_association/results.tsv`, `volcano.pdf`, `calibration.tsv` | All unit × program tests (incl. `unit_type`, `beyond_controls`, `p_vs_controls`) |
+| `3_association/controls/control_summary.tsv`, `control_results.tsv` | Negative-control check |
 | `4_gene_test/program_summary.tsv`, `heatmap_<program>.pdf`, `overlap.tsv`, `gene_results.tsv.gz` | Per-gene follow-up |
 | `5_enrichment/enrichment_programs.tsv`, `enrichment_regulators.tsv`, `top_terms.tsv` | Enrichment |
 | `6_annotation/report.md` (+ `packet.md`, `INSTRUCTIONS.md`) | AI report |
@@ -121,6 +131,8 @@ The output is checked for completeness (all required sections, a minimum length)
   - the permutation P-values against a brute-force version
   - planted regulators found with calibrated nulls, using given programs
   - Hotspot and hdWGCNA each recovering the planted programs (gene-set Jaccard > 0.8)
+  - the data check detecting the simulated knockdown; negative-control units staying null, and flagging a planted confounder (control guides detected more often in cells with high program activity)
+  - target names with promoter suffixes matched to their genes
 
 ## Citation
 

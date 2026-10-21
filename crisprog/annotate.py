@@ -48,6 +48,15 @@ A Markdown report with exactly these sections:
      effect may come from the target's own knockdown. Do not present these as trans regulators.
    - units with high `cells_overlap` share perturbed cells (shared guides or CREs) and cannot be separated.
    - few changed genes, few perturbed cells, or programs with weak or no enrichment.
+   - the negative-control check (if present): if control units are significant more often than ~5% in a
+     program, part of that program's signal is not specific; give more weight to associations with
+     `beyond controls` = True and say how many hits are beyond the control effect floor.
+   - positive controls (listed in the packet) are knockdown controls, not the regulators of interest. Report
+     their program effects in their own short subsection, not among the regulators. For each, say whether the
+     effect is a plausible consequence of losing that gene (e.g. an essential, ribosomal or mitochondrial gene)
+     or looks non-specific (e.g. a surface protein moving a lineage program), which would also caution the
+     interpretation of similar-sized effects of real units.
+   - problems flagged in the data check (WARN/FAIL) that affect interpretation.
    - programs with low coherence (median correlation of their genes with the program score; real programs
      are typically well above noise-like ones) may be technical or noise.
 5. **Hypotheses** - 3-5 specific, testable follow-up hypotheses, each tied to the result it comes from.
@@ -126,10 +135,23 @@ def build_packet(cfg, out):
                              regulators=[dict(unit=r.unit, direction="up" if r.t > 0 else "down",
                                               effect_sd=round(float(r.effect_sd), 3), fdr=float(r.fdr))
                                          for r in h.itertuples()] if len(h) else []))
-    assoc = [dict(unit=r.unit, program=r.program, n_perturbed=int(r.n_perturbed),
-                  effect_sd=round(float(r.effect_sd), 3), fdr=float(r.fdr), targets=r.targets,
-                  target_in_program=None if pd.isna(r.target_in_program) else bool(r.target_in_program))
+    def opt(r, k):
+        v = getattr(r, k, None)
+        return None if v is None or pd.isna(v) else v
+
+    assoc = [dict(unit=r.unit, unit_type=opt(r, "unit_type") or "test", program=r.program,
+                  n_perturbed=int(r.n_perturbed), effect_sd=round(float(r.effect_sd), 3), fdr=float(r.fdr),
+                  targets=r.targets,
+                  target_in_program=None if pd.isna(r.target_in_program) else bool(r.target_in_program),
+                  beyond_controls=None if opt(r, "beyond_controls") is None else bool(r.beyond_controls),
+                  p_vs_controls=None if opt(r, "p_vs_controls") is None else round(float(r.p_vs_controls), 3))
              for r in hits.itertuples()] if len(hits) else []
+    cs = _read(os.path.join(od, DIRS["test"], "controls", "control_summary.tsv"))
+    controls = [dict(program=r.program, type=r.type, n_units=int(r.n_units), frac_p_lt_005=round(float(r.frac_p_lt_005), 3),
+                     n_fdr_hits=int(r.n_fdr_hits), effect_q99=round(float(r.effect_q99), 3))
+                for r in cs.itertuples()] if len(cs) else []
+    chk = os.path.join(od, DIRS["check"], "check_report.md")
+    check_md = open(chk).read() if os.path.exists(chk) else ""
     follow = []
     for r in summ.itertuples() if len(summ) else []:
         follow.append(dict(unit=r.unit, program=r.program, changed_in_program=int(r.changed_in_program),
@@ -149,7 +171,9 @@ def build_packet(cfg, out):
                        null_share_p_lt_0_05_programs=None if cal.empty else round(float(cal["null_frac_p_ols_lt_0.05"].mean()), 3),
                        null_share_p_lt_0_05_genes=None if gcal.empty else round(float(gcal["frac_p_lt_0.05"].mean()), 3),
                        enrichment_backend=None if ep.empty else ep.backend.iloc[0]),
-              programs=programs, associations=assoc, gene_followup=follow, overlaps=overlaps)
+              programs=programs, associations=assoc, gene_followup=follow, overlaps=overlaps,
+              positive_controls=list(cfg["data"]["positive_controls"]), negative_controls=controls,
+              data_check=check_md)
     with open(os.path.join(out, "packet.json"), "w") as fh:
         json.dump(pk, fh, indent=1, default=str)
     md = _packet_md(pk)
@@ -180,10 +204,27 @@ def _packet_md(pk):
                                                             f"{r['effect_sd']} SD, FDR {r['fdr']:.2g})"
                                                             for r in p["regulators"]))
         L.append("")
-    L += ["## Significant associations", "", "| unit | program | n perturbed cells | effect (SD) | FDR | targets "
-          "| target in program |", "|---|---|---|---|---|---|---|"]
-    L += [f"| {x['unit']} | {x['program']} | {x['n_perturbed']} | {x['effect_sd']} | {x['fdr']:.2g} | "
-          f"{x['targets']} | {x['target_in_program']} |" for x in pk["associations"]]
+    if pk.get("positive_controls"):
+        L += ["## Positive controls", "", "These targets are knockdown controls in the library, not regulators of "
+              "interest: " + ", ".join(pk["positive_controls"]) + ". Report their effects separately; see the "
+              "instructions.", ""]
+    if pk.get("negative_controls"):
+        L += ["## Negative-control check", "",
+              "Control units = random groups of negative-control guides, tested exactly like real units. Expected: "
+              "~0.05 of them with p < 0.05 and none at FDR < 0.05. effect_q99 = 99th percentile of control |effect "
+              "(SD)| in that program (the control effect floor).", "",
+              "| program | control type | control units | share p < 0.05 | at FDR < 0.05 | effect_q99 |",
+              "|---|---|---|---|---|---|"]
+        L += [f"| {c['program']} | {c['type']} | {c['n_units']} | {c['frac_p_lt_005']} | {c['n_fdr_hits']} | "
+              f"{c['effect_q99']} |" for c in pk["negative_controls"]]
+        L.append("")
+    has_ctrl = any(x.get("beyond_controls") is not None for x in pk["associations"])
+    L += ["## Significant associations", "", "| unit | type | program | n perturbed cells | effect (SD) | FDR | targets "
+          "| target in program |" + (" beyond controls | p vs controls |" if has_ctrl else ""),
+          "|---|---|---|---|---|---|---|---|" + ("---|---|" if has_ctrl else "")]
+    L += [f"| {x['unit']} | {x['unit_type']} | {x['program']} | {x['n_perturbed']} | {x['effect_sd']} | {x['fdr']:.2g} | "
+          f"{x['targets']} | {x['target_in_program']} |"
+          + (f" {x['beyond_controls']} | {x['p_vs_controls']} |" if has_ctrl else "") for x in pk["associations"]]
     L += ["", "## Per-gene follow-up (own targets excluded)", "",
           "ratio = share of program genes changed / share of all genes changed",
           "", "| unit | program | changed / tested program genes | up | down | same direction as program | ratio "
@@ -197,6 +238,8 @@ def _packet_md(pk):
         for f in enr:
             L.append(f"- {f['unit']} | {f['program']}: " + "; ".join(
                 f"{e['term']} q={e['q']:.2g} ({', '.join(e['genes'])})" for e in f["enrichment"]))
+    if pk.get("data_check"):
+        L += ["", "## Data check (before the analysis)", "", pk["data_check"].replace("# Data check", "### Data check")]
     if pk["overlaps"]:
         L += ["", "## Regulator pairs that share perturbed cells or changed genes (same program)", "",
               "cells_overlap = share of the smaller unit's perturbed cells also perturbed for the other", "",
@@ -217,18 +260,22 @@ def strip_preamble(text):
     return "\n".join(lines[first:]).strip()
 
 
-def check_report(text):
+def check_report(text, required=REQUIRED, min_words=300):
     """Problems that make an output unusable as the report (empty list = fine)."""
-    missing = [h for h in REQUIRED if h not in text]
+    missing = [h for h in required if h not in text]
     words = len(text.split())
     return ([f"missing sections: {', '.join(missing)}"] if missing else []) + \
-           ([f"only {words} words"] if words < 300 else [])
+           ([f"only {words} words"] if words < min_words else [])
 
 
-def _claude_code(out, an):
-    cmd = ["claude", "-p", "Read INSTRUCTIONS.md and packet.md in the current folder and follow the "
-           "instructions. Reply with the report only.", "--output-format", "text",
-           "--allowedTools", "Read,WebSearch,WebFetch" if an["web_search"] else "Read",
+ANNOTATE_PROMPT = ("Read INSTRUCTIONS.md and packet.md in the current folder and follow the instructions. "
+                   "Reply with the report only.")
+
+
+def _claude_code(out, an, prompt=ANNOTATE_PROMPT, required=REQUIRED, min_words=300, web=None):
+    web = an["web_search"] if web is None else web
+    cmd = ["claude", "-p", prompt, "--output-format", "text",
+           "--allowedTools", "Read,WebSearch,WebFetch" if web else "Read",
            "--max-turns", str(an["max_turns"])]
     if an["model"]:
         cmd += ["--model", an["model"]]
@@ -238,7 +285,7 @@ def _claude_code(out, an):
         r = subprocess.run(cmd, cwd=out, capture_output=True, text=True, timeout=3600)
         text = strip_preamble(r.stdout)
         problems = ([f"exit code {r.returncode}: {r.stderr.strip()[:300]}"] if r.returncode != 0 else []) \
-            + check_report(text)
+            + check_report(text, required, min_words)
         if not problems:
             return text
         with open(os.path.join(out, f"failed_attempt_{i}.md"), "w") as fh:
@@ -247,18 +294,19 @@ def _claude_code(out, an):
     raise SystemExit(f"no usable report after {tries} attempts")
 
 
-def _api(out, an, packet_md):
+def _api(out, an, packet_md, system=None, required=REQUIRED, min_words=300, web=None):
     import anthropic
     client = anthropic.Anthropic()
     model = an["model"] or "claude-opus-5-5"
+    web = an["web_search"] if web is None else web
     tools = [{"type": "web_search_20260209", "name": "web_search", "max_uses": 40},
-             {"type": "web_fetch_20260209", "name": "web_fetch", "max_uses": 20}] if an["web_search"] else []
+             {"type": "web_fetch_20260209", "name": "web_fetch", "max_uses": 20}] if web else []
     messages = [{"role": "user", "content": packet_md + "\n\nWrite the report now."}]
     log(f"calling the Anthropic API ({model}{', web search on' if tools else ''})")
     final = None
     for _ in range(8):                                    # resume server-tool loops that pause
         with client.beta.messages.stream(
-                model=model, max_tokens=64000, system=INSTRUCTIONS, messages=messages, tools=tools,
+                model=model, max_tokens=64000, system=system or INSTRUCTIONS, messages=messages, tools=tools,
                 thinking={"type": "adaptive"}, output_config={"effort": "high"},
                 betas=["server-side-fallback-2026-07-01"], fallbacks="default") as stream:
             final = stream.get_final_message()
@@ -276,7 +324,7 @@ def _api(out, an, packet_md):
                 if url:
                     sources[url] = getattr(c, "title", "") or url
     report = strip_preamble("".join(text))
-    problems = check_report(report)
+    problems = check_report(report, required, min_words)
     if problems:
         with open(os.path.join(out, "failed_attempt_api.md"), "w") as fh:
             fh.write(report + "\n")
@@ -321,3 +369,52 @@ def run_annotation(cfg, out):
     with open(os.path.join(out, "report.md"), "w") as fh:
         fh.write(report)
     log(f"report written: {os.path.join(out, 'report.md')}")
+
+
+# --------------------------------------------------------------------------------------------- data-check review
+REVIEW_INSTRUCTIONS = """You are reviewing the data check of a CRISPR-screen analysis (CRISProg) before the analysis runs.
+
+Read check_report.md (and unit_qc.tsv if you need per-unit numbers) in the current folder. Write a short review with
+exactly these sections:
+
+## Verdict
+One line: run as configured / run after the changes below / do not run. Then 1-3 sentences why.
+
+## Problems
+For each WARN or FAIL: what it means in plain language, whether it matters for the results, and how to fix it.
+
+## Suggested config changes
+A YAML snippet with only the keys to change (e.g. covariates.batch, data.control_pattern, data.control_types,
+data.positive_controls, data.gene_col). Write "none" if nothing should change.
+
+## What to watch in the results
+2-4 concrete things to look at once the run finishes (e.g. control-unit summary, units with weak knockdown).
+
+Rules: use only what the files say; do not invent numbers; be concise (200-600 words); reply with the review only.
+"""
+REVIEW_REQUIRED = ("## Verdict", "## Problems", "## Suggested config changes")
+
+
+def review_check(cfg, out, report_md):
+    """Optional AI reading of the data check (check.review: claude-code | api); never stops the run."""
+    an, backend = cfg["annotation"], cfg["check"]["review"]
+    with open(os.path.join(out, "REVIEW_INSTRUCTIONS.md"), "w") as fh:
+        fh.write(REVIEW_INSTRUCTIONS)
+    try:
+        if backend == "claude-code":
+            if not shutil.which("claude"):
+                raise RuntimeError("the `claude` command was not found")
+            text = _claude_code(out, an, prompt="Read REVIEW_INSTRUCTIONS.md and check_report.md in the current "
+                                "folder and follow the instructions. Reply with the review only.",
+                                required=REVIEW_REQUIRED, min_words=80, web=False)
+        elif backend == "api":
+            text = _api(out, an, report_md, system=REVIEW_INSTRUCTIONS, required=REVIEW_REQUIRED, min_words=80,
+                        web=False)
+        else:
+            raise RuntimeError(f"unknown check.review '{backend}' (none | claude-code | api)")
+    except (SystemExit, Exception) as ex:
+        log(f"WARNING: data-check review with {backend} failed ({str(ex)[:200]}); check_report.md is still there")
+        return
+    with open(os.path.join(out, "review.md"), "w") as fh:
+        fh.write(text + "\n")
+    log(f"data-check review written: {os.path.join(out, 'review.md')}")
