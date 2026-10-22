@@ -50,7 +50,12 @@ A Markdown report with exactly these sections:
    - few changed genes, few perturbed cells, or programs with weak or no enrichment.
    - the negative-control check (if present): if control units are significant more often than ~5% in a
      program, part of that program's signal is not specific; give more weight to associations with
-     `beyond controls` = True and say how many hits are beyond the control effect floor.
+     `beyond controls` = True and say how many hits are beyond the control effect floor. When control types
+     differ, say which is the closer null: for CRISPRi/CRISPRa, safe-targeting guides (which bind a silent
+     locus) match targeting guides better than non-targeting guides (which bind nowhere). If only the
+     non-targeting type is off, describe it as a difference between binding and non-binding guides rather than
+     as evidence that the program's signal is non-specific. Name the control type whenever you quote control
+     numbers.
    - positive controls (listed in the packet) are knockdown controls, not the regulators of interest. Report
      their program effects in their own short subsection, not among the regulators. For each, say whether the
      effect is a plausible consequence of losing that gene (e.g. an essential, ribosomal or mitochondrial gene)
