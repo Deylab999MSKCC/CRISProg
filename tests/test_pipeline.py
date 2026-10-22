@@ -338,3 +338,28 @@ def test_packet_target_ids_and_pair_summary(tmp_path, example_data):
     assert "G0900 (ENSG_G0900)" in pk
     ov = pd.read_csv(tmp_path / "out" / "4_gene_test" / "overlap.tsv", sep="\t")
     assert ("summary over ALL pairs" in pk) == (len(ov) > 0)
+
+
+@needs_r
+def test_check_suggests_and_explains_settings(tmp_path, example_data):
+    """A bare config gets rule-based suggestions (counts layer, controls, batch) that work when applied."""
+    from crisprog import cli, config
+    import yaml
+    cfg = {"name": "bare", "results_dir": str(tmp_path),
+           "data": {"h5ad": str(example_data / "example.h5ad"), "guide_col": "guides",
+                    "target_map": str(example_data / "guide_targets.tsv")},
+           "programs": {"file": str(example_data / "programs.gmt")}}
+    p = tmp_path / "bare.yaml"
+    p.write_text(yaml.safe_dump(cfg))
+    cli.main(["run", str(p), "--steps", "check"])
+    out = tmp_path / "bare" / "0_check"
+    sug = yaml.safe_load(open(out / "suggested_config.yaml"))
+    assert sug["data"]["counts_layer"] == "counts"
+    assert sug["covariates"]["batch"] == ["batch"]
+    assert "Settings explained" in open(out / "check_report.md").read()
+    for k1, v in sug.items():                                  # apply the suggestions: controls are now found
+        cfg[k1] = {**cfg.get(k1, {}), **v}
+    p.write_text(yaml.safe_dump(cfg))
+    from crisprog.analysis import Analysis
+    A = Analysis(config.load(str(p)))
+    assert len(A.control_guides) == 40 and A.batch_cols == ["batch"]

@@ -13,7 +13,9 @@ Looks at the analysis data with the config's settings and reports PASS / WARN / 
   programs       measured genes per given program; counts for discovery
 
 Outputs (0_check/):
-  check_report.md     verdicts, numbers and recommendations
+  check_report.md     verdicts, numbers, and 'Settings explained' (what each setting does, its value, what the data
+                      shows; rule-based)
+  suggested_config.yaml  settings the rules recommend changing, each with its reason
   unit_qc.tsv         per unit: type, cells, guides, targets, measured target genes, knockdown t, top-batch share
   review.md           optional: an AI reading of check_report.md (check.review: claude-code | api)
 """
@@ -240,13 +242,21 @@ def run_check(cfg, ctx, out):
          f"Data: `{d['h5ad']}`", ""]
     for area in dict.fromkeys(x[1] for x in items):
         L += [f"## {area}", ""] + [f"- **{l}** {m}" for l, ar, m in items if ar == area] + [""]
-    L += ["## Files", "", "- `unit_qc.tsv`: per unit cells, guides, targets, knockdown t, top-batch share", ""]
+    from .settings import explanations_md, suggest_and_explain, write_suggestions
+    _, znames, *_ = A.design(np.arange(len(A.cells)))
+    S, E = suggest_and_explain(cfg, A, znames)
+    write_suggestions(S, os.path.join(out, "suggested_config.yaml"))
+    L += [explanations_md(E, S)]
+    L += ["## Files", "", "- `unit_qc.tsv`: per unit cells, guides, targets, knockdown t, top-batch share",
+          "- `suggested_config.yaml`: the settings changes suggested above, with reasons", ""]
     md = "\n".join(L)
     with open(os.path.join(out, "check_report.md"), "w") as fh:
         fh.write(md)
     for l, ar, m in items:
         if l != "PASS":
             log(f"check [{l}] {ar}: {m}")
+    for path, value, reason in S:
+        log(f"check suggests {path} = {value}  ({reason})")
     log(f"data check: {verdict} ({sum(l == 'WARN' for l, _, _ in items)} warnings, "
         f"{sum(l == 'FAIL' for l, _, _ in items)} failures); see {os.path.join(out, 'check_report.md')}")
     if cfg["check"]["review"] not in (None, "none"):

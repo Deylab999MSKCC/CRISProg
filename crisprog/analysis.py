@@ -44,6 +44,7 @@ class Analysis:
         if pos:
             log(f"positive-control units: {', '.join(self.units.unit[self.units.unit_type != 'test']) or 'none found'}")
         self.Gc, self.control_guides = Gc[keep], cguides           # negative-control guides (not tested as units)
+        self.guide_names = guides                                   # non-control guide labels
         types = d["control_types"] or {}
         self.control_type = np.array([next((k for k, rx in types.items() if re.search(rx, g)), "control")
                                       for g in cguides], dtype=object)
