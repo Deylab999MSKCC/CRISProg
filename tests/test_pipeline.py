@@ -363,3 +363,35 @@ def test_check_suggests_and_explains_settings(tmp_path, example_data):
     from crisprog.analysis import Analysis
     A = Analysis(config.load(str(p)))
     assert len(A.control_guides) == 40 and A.batch_cols == ["batch"]
+
+
+def test_report_factcheck_and_render(tmp_path, example_data, monkeypatch):
+    """The draft is checked (rule-based + a fake AI fact-check pass), corrected, logged and rendered to HTML."""
+    from crisprog import cli
+    fake = tmp_path / "bin"
+    fake.mkdir()
+    body = "\n\n".join(f"## {h}\n" + "word " * 100 for h in ("Overview", "Programs", "Regulators"))
+    draft = "# Report\n\n" + body + "\n\nG0900 changed 20/20 genes.\n\n## References\n\n1. none\n"
+    fixed = draft.replace("20/20 genes", "many genes") + "\n## Fact-check log\n\n- was: 20/20 -> now: many (not in packet)\n"
+    (tmp_path / "draft.md").write_text(draft)
+    (tmp_path / "fixed.md").write_text(fixed)
+    script = fake / "claude"
+    script.write_text(f"""#!/bin/sh
+case "$*" in *FACTCHECK*) cat {tmp_path}/fixed.md ;; *) cat {tmp_path}/draft.md ;; esac
+""")
+    script.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{fake}:{os.environ['PATH']}")
+    cfgp = _config(tmp_path, example_data, file=str(example_data / "programs.gmt"))
+    import yaml
+    c = yaml.safe_load(open(cfgp))
+    c["aucell"]["n_repeats"] = 1
+    c["association"].update(n_perm=200, control_n_perm=200)
+    c["annotation"] = {"backend": "claude-code", "retries": 0}
+    yaml.safe_dump(c, open(cfgp, "w"))
+    cli.main(["run", cfgp, "--steps", "score,test,genes,enrich,annotate"])
+    out = tmp_path / "out" / "6_annotation"
+    assert "20/20" in open(out / "report_draft.md").read()
+    assert "20/20" not in open(out / "report.md").read()
+    fc = open(out / "factcheck.md").read()
+    assert "`20/20`" in fc and "was: 20/20" in fc
+    assert (out / "report.html").exists()

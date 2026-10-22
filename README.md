@@ -12,7 +12,7 @@ Each perturbation changes downstream (trans) genes only a little, and testing ev
 | `test` | `program score ~ perturbed + covariates` for every perturbation × program; stratified-permutation P-values; FDR within each program; **negative-control check** (random groups of control guides tested the same way) | `3_association/` |
 | `genes` | For the significant perturbations: the same model on every gene; per-program heatmaps; how broad and how concentrated each effect is; flags | `4_gene_test/` |
 | `enrich` | Pathway enrichment of the programs and of each regulator's changed program genes (**Enrichr** with your background; local GMT files as option/fallback) | `5_enrichment/` |
-| `annotate` | **Claude** interprets everything, with literature support, into a report | `6_annotation/` |
+| `annotate` | **Claude** interprets everything, with literature support, into a report; the report is then **fact-checked** (rule-based checks of every number and reference, plus a second AI pass that checks each claim against the results and the cited papers) and rendered to HTML/PDF | `6_annotation/` |
 
 ## Install
 
@@ -111,6 +111,8 @@ The report covers:
 
 The output is checked for completeness (all required sections, a minimum length). A cut-off or incomplete reply is never saved as the report: the step retries (`annotation.retries`, default 2), keeps failed outputs as `failed_attempt_<n>.md`, and if every attempt fails it leaves the packet for a manual run. The instructions forbid invented references and require calibrated language. Still, check the references before using them.
 
+**Report fact-check.** The AI report is not trusted as written. Rule-based checks (no AI) compare every q value, effect size, t value and gene count in the draft with the results packet, and resolve every PMID/DOI on PubMed/Crossref (author and year must match). A second AI pass (`annotation.factcheck`, on by default; it about doubles the Claude usage) then checks each claim against the packet and each citation against the paper's abstract, fixes only what is wrong and logs every change; the rule-based checks are rerun on the result. `factcheck.md` lists what was flagged and changed, and `report_draft.md` keeps the original. The report is rendered to `report.html` and, with Chrome/Chromium or WeasyPrint installed, `report.pdf` (`annotation.render`).
+
 ## Outputs (main files)
 
 | File | Content |
@@ -122,7 +124,7 @@ The output is checked for completeness (all required sections, a minimum length)
 | `3_association/controls/control_summary.tsv`, `control_results.tsv` | Negative-control check |
 | `4_gene_test/program_summary.tsv`, `heatmap_<program>.pdf`, `overlap.tsv`, `gene_results.tsv.gz` | Per-gene follow-up |
 | `5_enrichment/enrichment_programs.tsv`, `enrichment_regulators.tsv`, `top_terms.tsv` | Enrichment |
-| `6_annotation/report.md` (+ `packet.md`, `INSTRUCTIONS.md`) | AI report |
+| `6_annotation/report.md`, `report.pdf`, `report.html`, `factcheck.md` (+ `report_draft.md`, `packet.md`, `INSTRUCTIONS.md`) | Fact-checked AI report, rendered; what was checked and changed |
 
 ## Validation
 

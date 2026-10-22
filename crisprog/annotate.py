@@ -145,6 +145,9 @@ def build_packet(cfg, out):
                              top_genes=ranked.get(p, P.get(p, []))[:30], top_genes_order=rank_note.get(p, ""),
                              coherence=coherence.get(p),
                              enrichment=terms(ep, p),
+                             n_hits=int(len(h)),
+                             n_hits_beyond_controls=(int(h.beyond_controls.astype(str).eq("True").sum())
+                                                     if len(h) and "beyond_controls" in h else None),
                              regulators=[dict(unit=r.unit, direction="up" if r.t > 0 else "down",
                                               effect_sd=round(float(r.effect_sd), 3), fdr=float(r.fdr))
                                          for r in h.itertuples()] if len(h) else []))
@@ -192,7 +195,18 @@ def build_packet(cfg, out):
                        permutation_strata=info.get("strata"),
                        null_share_p_lt_0_05_programs=None if cal.empty else round(float(cal["null_frac_p_ols_lt_0.05"].mean()), 3),
                        null_share_p_lt_0_05_genes=None if gcal.empty else round(float(gcal["frac_p_lt_0.05"].mean()), 3),
-                       enrichment_backend=None if ep.empty else ep.backend.iloc[0]),
+                       enrichment_backend=None if ep.empty else ep.backend.iloc[0],
+                       significant_associations=int(len(hits)),
+                       units_with_a_significant_association=int(hits.unit.nunique()) if len(hits) else 0,
+                       of_which_test_units=(int(hits[hits.unit_type == "test"].unit.nunique())
+                                            if len(hits) and "unit_type" in hits else None),
+                       associations_beyond_control_floor=(int(hits.beyond_controls.astype(str).eq("True").sum())
+                                                          if len(hits) and "beyond_controls" in hits else None),
+                       test_associations=(int((hits.unit_type == "test").sum()) if len(hits) and "unit_type" in hits
+                                          else None),
+                       test_associations_beyond_control_floor=(
+                           int(((hits.unit_type == "test") & hits.beyond_controls.astype(str).eq("True")).sum())
+                           if len(hits) and "beyond_controls" in hits and "unit_type" in hits else None)),
               programs=programs, associations=assoc, gene_followup=follow, overlaps=overlaps,
               overlap_summary=overlap_summary,
               positive_controls=list(cfg["data"]["positive_controls"]), negative_controls=controls,
@@ -223,7 +237,9 @@ def _packet_md(pk):
         else:
             L.append("Enriched terms: none at the cutoff")
         if p["regulators"]:
-            L.append("Significant regulators: " + "; ".join(f"{r['unit']} {r['direction']} (effect "
+            nb = p.get("n_hits_beyond_controls")
+            L.append(f"Significant regulators ({p['n_hits']}" + (f"; {nb}/{p['n_hits']} beyond the control floor" if nb
+                     is not None else "") + "): " + "; ".join(f"{r['unit']} {r['direction']} (effect "
                                                             f"{r['effect_sd']} SD, FDR {r['fdr']:.2g})"
                                                             for r in p["regulators"]))
         L.append("")
@@ -303,7 +319,7 @@ ANNOTATE_PROMPT = ("Read INSTRUCTIONS.md and packet.md in the current folder and
                    "Reply with the report only.")
 
 
-def _claude_code(out, an, prompt=ANNOTATE_PROMPT, required=REQUIRED, min_words=300, web=None):
+def _claude_code(out, an, prompt=ANNOTATE_PROMPT, required=REQUIRED, min_words=300, web=None, tag=""):
     web = an["web_search"] if web is None else web
     cmd = ["claude", "-p", prompt, "--output-format", "text",
            "--allowedTools", "Read,WebSearch,WebFetch" if web else "Read",
@@ -319,9 +335,9 @@ def _claude_code(out, an, prompt=ANNOTATE_PROMPT, required=REQUIRED, min_words=3
             + check_report(text, required, min_words)
         if not problems:
             return text
-        with open(os.path.join(out, f"failed_attempt_{i}.md"), "w") as fh:
+        with open(os.path.join(out, f"failed_{tag + '_' if tag else ''}attempt_{i}.md"), "w") as fh:
             fh.write(text + "\n")
-        log(f"attempt {i} unusable ({'; '.join(problems)}); output kept in failed_attempt_{i}.md")
+        log(f"attempt {i} unusable ({'; '.join(problems)}); output kept in failed_{tag + '_' if tag else ''}attempt_{i}.md")
     raise SystemExit(f"no usable report after {tries} attempts")
 
 
@@ -397,9 +413,8 @@ def run_annotation(cfg, out):
         log(f"WARNING: annotation with {backend} failed ({str(ex)[:300]}); the packet is in {out} - rerun "
             "`python crisprog.py annotate <config>` where Claude can be reached, or open the packet in a Claude session")
         return
-    with open(os.path.join(out, "report.md"), "w") as fh:
-        fh.write(report)
-    log(f"report written: {os.path.join(out, 'report.md')}")
+    from .factcheck import finish_report
+    finish_report(cfg, out, report, REQUIRED)
 
 
 # --------------------------------------------------------------------------------------------- data-check review

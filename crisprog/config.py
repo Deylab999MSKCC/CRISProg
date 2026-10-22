@@ -92,7 +92,11 @@ DEFAULTS = {
     "annotation": {"backend": "claude-code",   # claude-code (default; packet if the CLI is missing) | api | packet
                    "context": "",          # what the experiment is: cells, perturbation, question
                    "model": None, "web_search": True, "max_turns": 60,
-                   "retries": 2},              # extra attempts if the report comes back cut off or incomplete
+                   "retries": 2,               # extra attempts if the report comes back cut off or incomplete
+                   "factcheck": True,          # second AI pass checking every claim against the results and the
+                                               # cited papers (about doubles the Claude usage); rule-based checks
+                                               # always run
+                   "render": True},            # report.html, and report.pdf if Chrome/Chromium or weasyprint exists
 }
 
 PATH_KEYS = [("data", "h5ad"), ("data", "target_map"), ("programs", "file"), ("programs", "background"),

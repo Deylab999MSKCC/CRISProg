@@ -104,3 +104,5 @@ annotation:
   web_search: true
   max_turns: 60
   retries: 2
+  factcheck: true
+  render: true
