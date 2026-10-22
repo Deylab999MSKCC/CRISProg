@@ -95,13 +95,16 @@ def parse_guides(values, sep=";", controls=(), control_pattern=None):
 
 
 def read_target_map(path):
-    """TSV with columns `guide` and `target` (one row per pair; a guide may hit several targets)."""
+    """TSV with columns `guide` and `target` (one row per pair; a guide may hit several targets), and optionally
+    `target_id` (e.g. the Ensembl gene ID), which is passed to the results and the report so that ambiguous
+    symbols (aliases, renamed genes) are identifiable."""
     d = pd.read_csv(path, sep="\t", dtype=str)
     if not {"guide", "target"} <= set(d.columns):
         raise SystemExit(f"{path}: needs columns `guide` and `target` (found: {', '.join(d.columns)})")
     d = d.dropna(subset=["guide", "target"])
     d = d.assign(guide=d["guide"].str.strip(), target=d["target"].str.strip())
-    return d[["guide", "target"]].drop_duplicates().reset_index(drop=True)
+    cols = ["guide", "target"] + (["target_id"] if "target_id" in d.columns else [])
+    return d[cols].drop_duplicates(["guide", "target"]).reset_index(drop=True)
 
 
 TARGET_SUFFIX = re.compile(r"(_P\d+(?:P\d+)*|-P\d+(?:P\d+)*(?:-\d+)?|_main|_[BC]|_strong|_weak|_\d+|_[+-]_.*|#.*)$")

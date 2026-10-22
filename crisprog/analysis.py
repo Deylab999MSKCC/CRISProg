@@ -33,6 +33,11 @@ class Analysis:
         self.U, self.units = build_units(G[keep], guides, tmap, merge_identical=d["merge_identical_targets"])
         self.cells, self.genes = cells[keep], genes
         self.units = add_target_genes(self.units, genes)
+        tid = {}
+        if tmap is not None and "target_id" in tmap.columns:
+            tid = tmap.dropna(subset=["target_id"]).drop_duplicates("target").set_index("target")["target_id"].to_dict()
+        self.units["target_ids"] = [";".join(str(tid.get(t, "")) for t in str(ts).split(";") if t) if tid else ""
+                                    for ts in self.units["targets"].fillna("")]
         pos = {x.strip() for x in d["positive_controls"]}
         self.units["unit_type"] = ["positive control" if pos & set(f"{t};{g}".split(";")) else "test"
                                    for t, g in zip(self.units["targets"].fillna(""), self.units["target_genes"])]

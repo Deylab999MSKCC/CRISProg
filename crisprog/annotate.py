@@ -48,8 +48,9 @@ A Markdown report with exactly these sections:
      effect may come from the target's own knockdown. Do not present these as trans regulators.
    - units with high `cells_overlap` share perturbed cells (shared guides or CREs) and cannot be separated.
    - few changed genes, few perturbed cells, or programs with weak or no enrichment.
-   - the negative-control check (if present): if control units are significant more often than ~5% in a
-     program, part of that program's signal is not specific; give more weight to associations with
+   - the negative-control check (if present): with ~100 control units per type, shares of control units at
+     p < 0.05 up to ~0.10 are ordinary noise and need no comment. Only if the share is clearly above 0.10, or
+     control units reach FDR < 0.05, is part of that program's signal not specific; give more weight to associations with
      `beyond controls` = True and say how many hits are beyond the control effect floor. When control types
      differ, say which is the closer null: for CRISPRi/CRISPRa, safe-targeting guides (which bind a silent
      locus) match targeting guides better than non-targeting guides (which bind nowhere). If only the
@@ -83,7 +84,14 @@ A Markdown report with exactly these sections:
   write that none was found.
 - Use calibrated language ("consistent with", "suggests"); these are associations from a knockdown screen.
   Do not claim mechanisms the data cannot show.
-- Quote numbers exactly as given (FDR, q, effect sizes, gene counts).
+- Quote numbers exactly as given (FDR, q, effect sizes, gene counts). For gene counts use the "changed / tested
+  program genes" column ("up" and "down" are subsets of "changed", not of "tested"); note that the tested count
+  can differ by one between units (a unit's own target gene is excluded).
+- Quote enrichment term names exactly as in the packet (you may drop library tags and GO IDs, but do not rename
+  a term or attach a q value to a different term). Attribute each term and number to the one unit and program
+  it belongs to; never summarize two units' terms as if both had them.
+- The regulator-pair table lists notable pairs only; for statements about all pairs (e.g. the highest share of
+  shared cells), use the summary line above the table.
 - Gene symbols in italics. Keep it concise: aim for 800-1500 words plus references.
 - Before replying, check every unit-program claim and every number in the report against packet.md.
 - Reply with the report only (no preamble).
@@ -146,7 +154,8 @@ def build_packet(cfg, out):
 
     assoc = [dict(unit=r.unit, unit_type=opt(r, "unit_type") or "test", program=r.program,
                   n_perturbed=int(r.n_perturbed), effect_sd=round(float(r.effect_sd), 3), fdr=float(r.fdr),
-                  targets=r.targets,
+                  targets=r.targets + (f" ({r.target_ids})" if isinstance(getattr(r, "target_ids", None), str)
+                                       and r.target_ids.strip(";") else ""),
                   target_in_program=None if pd.isna(r.target_in_program) else bool(r.target_in_program),
                   beyond_controls=None if opt(r, "beyond_controls") is None else bool(r.beyond_controls),
                   p_vs_controls=None if opt(r, "p_vs_controls") is None else round(float(r.p_vs_controls), 3))
@@ -169,6 +178,14 @@ def build_packet(cfg, out):
     overlaps = [dict(program=r.program, unit_a=r.unit_a, unit_b=r.unit_b, genes_jaccard=r.genes_jaccard,
                      cells_overlap=r.cells_overlap) for r in ov.itertuples()
                 if r.cells_overlap > 0.3 or r.genes_jaccard > 0.3] if len(ov) else []    # notable pairs only
+    overlap_summary = None
+    if len(ov):
+        pairs = ov.drop_duplicates(["unit_a", "unit_b"])
+        top = pairs.loc[pairs.cells_overlap.idxmax()]
+        overlap_summary = dict(pairs=int(len(pairs)), max_cells_overlap=round(float(top.cells_overlap), 4),
+                               max_pair=f"{top.unit_a} / {top.unit_b}",
+                               share_pairs_cells_overlap_gt_0_05=round(float((pairs.cells_overlap > 0.05).mean()), 4),
+                               max_genes_jaccard=round(float(ov.genes_jaccard.max()), 3))
     pk = dict(context=cfg["annotation"]["context"].strip(),
               run=dict(cells_analyzed=info.get("cells_analyzed"), units_tested=info.get("units_tested"),
                        programs_scored=len(scored), association_fdr=a["fdr"], design=info.get("design"),
@@ -177,6 +194,7 @@ def build_packet(cfg, out):
                        null_share_p_lt_0_05_genes=None if gcal.empty else round(float(gcal["frac_p_lt_0.05"].mean()), 3),
                        enrichment_backend=None if ep.empty else ep.backend.iloc[0]),
               programs=programs, associations=assoc, gene_followup=follow, overlaps=overlaps,
+              overlap_summary=overlap_summary,
               positive_controls=list(cfg["data"]["positive_controls"]), negative_controls=controls,
               data_check=check_md)
     with open(os.path.join(out, "packet.json"), "w") as fh:
@@ -245,8 +263,16 @@ def _packet_md(pk):
                 f"{e['term']} q={e['q']:.2g} ({', '.join(e['genes'])})" for e in f["enrichment"]))
     if pk.get("data_check"):
         L += ["", "## Data check (before the analysis)", "", pk["data_check"].replace("# Data check", "### Data check")]
+    if pk.get("overlap_summary"):
+        o = pk["overlap_summary"]
+        L += ["", "## Regulator pairs: summary over ALL pairs (same program)", "",
+              f"- pairs of significant regulators compared: {o['pairs']}",
+              f"- highest share of shared perturbed cells: {o['max_cells_overlap']} ({o['max_pair']})",
+              f"- share of pairs with more than 0.05 shared cells: {o['share_pairs_cells_overlap_gt_0_05']}",
+              f"- highest changed-gene Jaccard: {o['max_genes_jaccard']}"]
     if pk["overlaps"]:
-        L += ["", "## Regulator pairs that share perturbed cells or changed genes (same program)", "",
+        L += ["", "## Regulator pairs that share perturbed cells or changed genes (same program; notable pairs only:",
+              "cells overlap > 0.3 or changed-gene Jaccard > 0.3)", "",
               "cells_overlap = share of the smaller unit's perturbed cells also perturbed for the other", "",
               "| program | unit a | unit b | changed-gene Jaccard | cells overlap |", "|---|---|---|---|---|"]
         L += [f"| {o['program']} | {o['unit_a']} | {o['unit_b']} | {o['genes_jaccard']} | {o['cells_overlap']} |"

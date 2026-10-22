@@ -162,7 +162,8 @@ def step_test(cfg, ctx):
                                        dtype="boolean"),
         "targets_in_program": [m for row in members for m in row],
         "targets": np.repeat(A.units["targets"].to_numpy(), P),
-        "target_genes": np.repeat(A.units["target_genes"].to_numpy(), P), "guides": np.repeat(A.units["guides"].to_numpy(), P),
+        "target_genes": np.repeat(A.units["target_genes"].to_numpy(), P),
+        "target_ids": np.repeat(A.units["target_ids"].to_numpy(), P), "guides": np.repeat(A.units["guides"].to_numpy(), P),
     })
     res["program"] = pd.Categorical(res["program"], prog_names)
     res = res.sort_values(["program", "p_perm", "p_ols"]).reset_index(drop=True)

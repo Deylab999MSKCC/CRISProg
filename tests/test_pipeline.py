@@ -314,3 +314,27 @@ def test_control_count_covariate_absorbs_detection_bias(tmp_path, example_data):
     assert (cs.frac_p_lt_005 <= 0.12).all(), cs
     info = __import__("json").load(open(tmp_path / "out" / "3_association" / "run_info.json"))
     assert any(d.startswith("n_control") for d in info["design"])
+
+
+@needs_r
+def test_packet_target_ids_and_pair_summary(tmp_path, example_data):
+    """Target IDs from the target map reach results.tsv and the packet; the packet summarizes ALL regulator pairs."""
+    from crisprog import cli
+    import yaml
+    tm = pd.read_csv(example_data / "guide_targets.tsv", sep="\t")
+    tm["target_id"] = "ENSG_" + tm.target
+    tm.to_csv(tmp_path / "targets.tsv", sep="\t", index=False)
+    cfgp = _config(tmp_path, example_data, file=str(example_data / "programs.gmt"))
+    c = yaml.safe_load(open(cfgp))
+    c["data"]["target_map"] = str(tmp_path / "targets.tsv")
+    c["aucell"]["n_repeats"] = 1
+    c["association"].update(n_perm=200, control_n_perm=200)
+    c["annotation"] = {"backend": "packet"}
+    yaml.safe_dump(c, open(cfgp, "w"))
+    cli.main(["run", cfgp, "--steps", "score,test,genes,enrich,annotate"])
+    res = pd.read_csv(tmp_path / "out" / "3_association" / "results.tsv", sep="\t")
+    assert (res.loc[res.unit == "G0900", "target_ids"] == "ENSG_G0900").all()
+    pk = open(tmp_path / "out" / "6_annotation" / "packet.md").read()
+    assert "G0900 (ENSG_G0900)" in pk
+    ov = pd.read_csv(tmp_path / "out" / "4_gene_test" / "overlap.tsv", sep="\t")
+    assert ("summary over ALL pairs" in pk) == (len(ov) > 0)
