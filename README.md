@@ -111,6 +111,8 @@ The report covers:
 
 The output is checked for completeness (all required sections, a minimum length). A cut-off or incomplete reply is never saved as the report: the step retries (`annotation.retries`, default 2), keeps failed outputs as `failed_attempt_<n>.md`, and if every attempt fails it leaves the packet for a manual run. The instructions forbid invented references and require calibrated language. Still, check the references before using them.
 
+**Reproducing the original endoderm-screen model.** The paper's analysis used genes detected and MOI as numeric covariates plus the cell-ID prefix as batch, with no control guides. To run exactly that model, set `covariates.moi_categorical: false` (MOI as one straight-line term); the control-guide covariate and the negative-control check are not used because the screen has no control guides. On the endoderm screen, straight-line and per-value MOI give the same 17 associations at FDR < 0.05 (t values r = 0.9998).
+
 **Report fact-check.** The AI report is not trusted as written. Rule-based checks (no AI) compare every q value, effect size, t value and gene count in the draft with the results packet, and resolve every PMID/DOI on PubMed/Crossref (author and year must match). A second AI pass (`annotation.factcheck`, on by default; it about doubles the Claude usage) then checks each claim against the packet and each citation against the paper's abstract, fixes only what is wrong and logs every change; the rule-based checks are rerun on the result. `factcheck.md` lists what was flagged and changed, and `report_draft.md` keeps the original. The report is rendered to `report.html` and, with Chrome/Chromium or WeasyPrint installed, `report.pdf` (`annotation.render`).
 
 ## Outputs (main files)
