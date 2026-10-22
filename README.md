@@ -57,7 +57,7 @@ python crisprog.py genes config.yaml               # one step
 | Control guides | `data.controls`, `data.control_pattern` | Labels and/or a regex. Controls are not tested as units and don't count towards MOI; they are used for the negative-control check |
 | Control types | `data.control_types` | Optional `{type: regex}` to check kinds of negative controls separately, e.g. `{non-targeting: '^NTC', safe-targeting: '^OR'}` |
 | Positive controls | `data.positive_controls` | Optional list of targets that are knockdown controls (e.g. `B2M`, `CD81`); labelled in the results and reported separately |
-| Guide → target | `data.target_map` | Optional TSV with columns `guide`, `target`. Without it every guide is tested on its own; with it, guides are grouped by target, and targets with identical guides are tested once (`A/B`) |
+| Guide → target | `data.target_map` | Optional TSV with columns `guide`, `target` (and optionally `target_id`, e.g. the Ensembl ID, shown in the results and the report so that ambiguous symbols are identifiable). Without it every guide is tested on its own; with it, guides are grouped by target, and targets with identical guides are tested once (`A/B`) |
 | Programs | `programs.file` | Optional `.gmt` or TSV (`program`, `gene`). Without it, programs are discovered |
 | Enrichment background | `programs.background` | Optional gene list (one per line) for enriching given programs, e.g. the genes the programs were built from. Default: all measured genes |
 | Discovery data | `programs.discover.h5ad` | Optional separate h5ad to discover programs from (same format; e.g. a time course). Default: the analysis data |
