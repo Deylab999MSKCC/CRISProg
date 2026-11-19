@@ -34,6 +34,7 @@ programs:
     n_pcs: 30
     hotspot:
       n_neighbors: 30
+      neighbors: exact          # exact: same modules on every run; approx: faster, but modules can vary between runs
       n_genes: 1000
       min_module_genes: 20
       fdr: 0.05

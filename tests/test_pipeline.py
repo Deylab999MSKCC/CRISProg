@@ -143,7 +143,26 @@ def test_discovery_recovers_planted_programs(tmp_path, example_data):
     from crisprog import cli
     cfgp = _config(tmp_path, example_data, discover={"methods": ["hotspot"], "hotspot": {"n_genes": 500}})
     cli.main(["programs", cfgp])
+    first = (tmp_path / "out" / "1_programs" / "programs.tsv").read_bytes()
     _recovered(pd.read_csv(tmp_path / "out" / "1_programs" / "programs.tsv", sep="\t"))
+    cli.main(["programs", cfgp])                                  # exact neighbours: a rerun gives the same modules
+    assert (tmp_path / "out" / "1_programs" / "programs.tsv").read_bytes() == first
+
+
+@needs_r
+def test_annotate_without_target_map(tmp_path, example_data):
+    import yaml
+    from crisprog import cli
+    cfgp = _config(tmp_path, example_data, file=str(example_data / "programs.gmt"))
+    cfg = yaml.safe_load(open(cfgp))
+    del cfg["data"]["target_map"]                                 # every guide is its own unit, no targets
+    cfg["annotation"] = {"backend": "packet"}
+    open(cfgp, "w").write(yaml.safe_dump(cfg))
+    cli.main(["run", cfgp])
+    out = tmp_path / "out"
+    assert pd.read_csv(out / "3_association" / "results.tsv", sep="\t").targets.isna().all()
+    packet = (out / "6_annotation" / "packet.md").read_text()
+    assert "| G0005_g" in packet and "PROG_A" in packet           # planted guides reported without a target
 
 
 @needs_hdwgcna

@@ -157,7 +157,7 @@ def build_packet(cfg, out):
 
     assoc = [dict(unit=r.unit, unit_type=opt(r, "unit_type") or "test", program=r.program,
                   n_perturbed=int(r.n_perturbed), effect_sd=round(float(r.effect_sd), 3), fdr=float(r.fdr),
-                  targets=r.targets + (f" ({r.target_ids})" if isinstance(getattr(r, "target_ids", None), str)
+                  targets=(r.targets if isinstance(r.targets, str) else "") + (f" ({r.target_ids})" if isinstance(getattr(r, "target_ids", None), str)
                                        and r.target_ids.strip(";") else ""),
                   target_in_program=None if pd.isna(r.target_in_program) else bool(r.target_in_program),
                   beyond_controls=None if opt(r, "beyond_controls") is None else bool(r.beyond_controls),
@@ -351,12 +351,21 @@ def _api(out, an, packet_md, system=None, required=REQUIRED, min_words=300, web=
     messages = [{"role": "user", "content": packet_md + "\n\nWrite the report now."}]
     log(f"calling the Anthropic API ({model}{', web search on' if tools else ''})")
     final = None
+    # Server-side fallback (answer from a fallback model if the request is declined) is not accepted by every
+    # model; if the API rejects it, continue without it.
+    fallback = dict(betas=["server-side-fallback-2026-07-01"], fallbacks="default")
     for _ in range(8):                                    # resume server-tool loops that pause
-        with client.beta.messages.stream(
-                model=model, max_tokens=64000, system=system or INSTRUCTIONS, messages=messages, tools=tools,
-                thinking={"type": "adaptive"}, output_config={"effort": "high"},
-                betas=["server-side-fallback-2026-07-01"], fallbacks="default") as stream:
-            final = stream.get_final_message()
+        try:
+            with client.beta.messages.stream(
+                    model=model, max_tokens=64000, system=system or INSTRUCTIONS, messages=messages, tools=tools,
+                    thinking={"type": "adaptive"}, output_config={"effort": "high"}, **fallback) as stream:
+                final = stream.get_final_message()
+        except anthropic.BadRequestError as e:
+            if not fallback or "fallback" not in str(e).lower():
+                raise
+            log(f"{model} does not take server-side fallback; continuing without it")
+            fallback = {}
+            continue
         if final.stop_reason != "pause_turn":
             break
         messages.append({"role": "assistant", "content": final.content})

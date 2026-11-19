@@ -85,7 +85,10 @@ def _hotspot(counts, genes, cells, emb, dc, out):
     ad.obsm["X_emb"] = np.asarray(emb, dtype=np.float64)
     hs = hotspot.Hotspot(ad, layer_key="counts", model="danb", latent_obsm_key="X_emb",
                          umi_counts_obs_key="total_counts")
-    hs.create_knn_graph(weighted_graph=False, n_neighbors=int(hc["n_neighbors"]))
+    # Approximate neighbours (pynndescent) take no seed, so the graph and the modules can change between runs.
+    approx = hc.get("neighbors", "exact") == "approx"
+    log(f"Hotspot: {'approximate' if approx else 'exact'} {int(hc['n_neighbors'])}-nearest-neighbour graph")
+    hs.create_knn_graph(weighted_graph=False, n_neighbors=int(hc["n_neighbors"]), approx_neighbors=approx)
     auto = hs.compute_autocorrelations(jobs=int(dc["jobs"]))
     auto.to_csv(os.path.join(out, f"{method}_autocorrelation.tsv"), sep="\t")
     sig = auto[auto.FDR < hc["fdr"]].sort_values("Z", ascending=False).head(int(hc["n_genes"]))

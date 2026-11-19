@@ -44,6 +44,7 @@ DEFAULTS = {
             "n_pcs": 30,
             "hotspot": {
                 "n_neighbors": 30,         # cell kNN graph on the PCA
+                "neighbors": "exact",      # exact: same modules on every run; approx: faster, varies between runs
                 "n_genes": 1000,           # top autocorrelated genes (FDR < fdr) used to build modules
                 "min_module_genes": 20,
                 "fdr": 0.05,
@@ -145,6 +146,9 @@ def load(path):
     if set(disc["methods"]) & {"pca", "cnmf"}:
         raise SystemExit("config: programs.discover.methods are now hotspot and/or hdwgcna (cNMF was removed; "
                          "Hotspot always runs on the PCA)")
+    if disc["hotspot"]["neighbors"] not in ("exact", "approx"):
+        raise SystemExit(f"config: programs.discover.hotspot.neighbors must be exact or approx "
+                         f"(got {disc['hotspot']['neighbors']!r})")
     for k, src in (("h5ad", "h5ad"), ("counts_layer", "counts_layer"), ("gene_col", "gene_col")):
         if disc[k] is None:
             disc[k] = cfg["data"][src]
