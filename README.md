@@ -17,7 +17,7 @@ Each perturbation changes downstream (trans) genes only a little, and testing ev
 ## Install
 
 ```bash
-git clone <repo-url> && cd CRISProg
+git clone https://github.com/Deylab999MSKCC/CRISProg.git && cd CRISProg
 conda env create -f environment.yml
 conda activate crisprog
 Rscript -e 'remotes::install_github("smorabit/hdWGCNA", ref = "dev", upgrade = "never")'   # not on conda
