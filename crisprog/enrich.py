@@ -54,13 +54,16 @@ def gene_lists(cfg):
     summ_f, res_f = os.path.join(gt, "program_summary.tsv"), os.path.join(gt, "gene_results.tsv.gz")
     if os.path.exists(summ_f) and os.path.exists(res_f):
         summ = pd.read_csv(summ_f, sep="\t")
-        R = pd.read_csv(res_f, sep="\t", keep_default_na=False)
+        R = pd.read_csv(res_f, sep="\t", keep_default_na=False, usecols=["unit", "gene", "fdr", "is_target"])
         fc = cfg["gene_test"]["fdr"]
         measured = set(R.gene)
+        # changed genes per unit, own targets excluded: one pass over the table (it has units x all genes rows)
+        R = R[(pd.to_numeric(R.fdr, errors="coerce") < fc) & ~R.is_target.astype(str).str.lower().eq("true")]
+        changed = R.groupby("unit").gene.apply(set).to_dict()
+        del R
         for s in summ.itertuples():
             prog_bg = [g for g in progs.get(s.program, []) if g in measured]
-            r = R[(R.unit == s.unit) & ~R.is_target.astype(str).str.lower().eq("true")]
-            ch = sorted(set(r.gene[pd.to_numeric(r.fdr) < fc]) & set(prog_bg))
+            ch = sorted(changed.get(s.unit, set()) & set(prog_bg))
             if len(ch) >= 5:
                 lists.append(("regulator", f"{s.unit} | {s.program}", ch, prog_bg))
     else:
