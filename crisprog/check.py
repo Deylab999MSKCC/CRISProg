@@ -25,7 +25,7 @@ import re
 import numpy as np
 import pandas as pd
 
-from .model import OLSEngine
+from .model import make_engine
 from .utils import log
 
 LEVELS = {"PASS": 0, "INFO": 1, "WARN": 2, "FAIL": 3}
@@ -57,7 +57,7 @@ def knockdown_t(A, units_idx, min_cells=10, chunk=200):
         cols = genes[s:s + chunk]
         Y = A.X[:, cols]
         Y = Y.toarray() if hasattr(Y, "toarray") else np.asarray(Y)
-        _, _, t, _ = OLSEngine(U, Y.astype(np.float64), Z).stats()
+        _, _, t, _ = make_engine(U, Y.astype(np.float64), Z, A.ref_mask(rows)).stats()
         for j, g in enumerate(cols):
             for k in by_gene[g]:
                 if np.isfinite(t[k, j]) and not (out[k] <= t[k, j]):      # keep the most negative
@@ -136,8 +136,9 @@ def run_check(cfg, ctx, out):
         has_ctrl = np.asarray(A.Gc.sum(axis=1)).ravel() > 0
         if has_ctrl.any() and (np.asarray(A.U[has_ctrl].sum(axis=1)).ravel() == 0).all():
             add("INFO", "controls", "cells with control guides carry no targeting guide: the controls are a separate "
-                "population (e.g. a single control guide vs several targeting guides per cell). MOI is modeled as "
-                "categories so that control units are compared with control cells of the same MOI")
+                "population (e.g. a single control guide vs several targeting guides per cell). "
+                + ("Control units are compared with the other control cells" if A.reference == "controls" else
+                   "MOI is modeled as categories so that control units are compared with control cells of the same MOI"))
         if not d["control_types"] and nc >= 4:
             kinds = {"non-targeting": r"non.?target|ntc", "safe-targeting": r"safe|^NC_OR|^OR\d"}
             seen = [k for k, rx in kinds.items() if any(re.search(rx, g, re.I) for g in A.control_guides)]
@@ -153,6 +154,22 @@ def run_check(cfg, ctx, out):
         f"10th percentile {np.percentile(n1[tested], 10) if tested.any() else 0:.0f}")
     if tested.sum() < 0.5 * len(A.units):
         add("WARN", "units", f"only {tested.mean():.0%} of units have enough cells")
+    # ---- reference: what each unit is compared with ----
+    big = int(n1.max()) if len(n1) else 0
+    big_u = A.units.unit.iat[int(np.argmax(n1))] if len(n1) else ""
+    if A.reference == "controls":
+        nref = int(A.is_ref.sum())
+        add("PASS" if nref >= 100 else "WARN", "reference",
+            f"each unit is compared with the {nref:,} control cells only (association.reference: controls)"
+            + ("" if nref >= 100 else "; few control cells, so every comparison is noisy"))
+    elif np.median(moi) <= 1 and big > 0.05 * len(A.cells):
+        add("WARN" if big > 0.10 * len(A.cells) else "INFO", "reference",
+            f"one perturbation per cell and the largest unit ({big_u}) holds {big / len(A.cells):.0%} of cells: with "
+            "association.reference: all, each unit is compared with all other cells, mostly cells with other "
+            "perturbations, so a large unit's effect shifts everyone's baseline. association.reference: controls "
+            "compares each unit with the control cells only")
+    else:
+        add("INFO", "reference", "each unit is compared with all other cells (association.reference: all)")
     ptype = A.units["unit_type"].to_numpy()
     if d["positive_controls"]:
         found = A.units.unit[ptype == "positive control"].tolist()

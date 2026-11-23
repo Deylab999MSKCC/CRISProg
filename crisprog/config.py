@@ -76,6 +76,10 @@ DEFAULTS = {
                "n_repeats": 5},             # average the AUC over this many tie-breaking seeds (1 = fastest)
     "association": {"min_perturbed": 10, "n_perm": 10000, "perm_p": "auto", "pool_bins": 5, "depth_bins": 10,
                     "fdr_scope": "program", "fdr": 0.05, "seed": 1,
+                    # which cells a unit is compared with: all (every other cell; fits high-MOI screens) |
+                    # controls (only cells with control guides and no targeting guide, e.g. WT / non-targeting;
+                    # for one-perturbation-per-cell screens where a few perturbations hold many cells)
+                    "reference": "all",
                     # negative-control check: random groups of control guides tested like real units
                     "control_units": "auto",      # auto (when individual control guides exist) | true | false
                     "control_unit_cells": None,   # perturbed cells per control unit; default: the median of the
@@ -149,6 +153,9 @@ def load(path):
     if disc["hotspot"]["neighbors"] not in ("exact", "approx"):
         raise SystemExit(f"config: programs.discover.hotspot.neighbors must be exact or approx "
                          f"(got {disc['hotspot']['neighbors']!r})")
+    if cfg["association"]["reference"] not in ("all", "controls"):
+        raise SystemExit(f"config: association.reference must be all or controls "
+                         f"(got {cfg['association']['reference']!r})")
     for k, src in (("h5ad", "h5ad"), ("counts_layer", "counts_layer"), ("gene_col", "gene_col")):
         if disc[k] is None:
             disc[k] = cfg["data"][src]

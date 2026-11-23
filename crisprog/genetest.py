@@ -33,12 +33,12 @@ import pandas as pd
 from scipy import stats
 
 from .data import read_programs, target_genes
-from .model import OLSEngine, stratified_permutation
+from .model import RefEngine, make_engine, stratified_permutation
 from .utils import benjamini_hochberg, log
 
 
-def _fit(Xu, Y, Z):
-    eng = OLSEngine(Xu, Y, Z)
+def _fit(Xu, Y, Z, ref=None):
+    eng = make_engine(Xu, Y, Z, ref)
     beta, se, t, _ = eng.stats()
     return beta, t, 2.0 * stats.t.sf(np.abs(t), eng.df)
 
@@ -56,6 +56,7 @@ def run_gene_test(cfg, A, out):
                        dtype={"cell": str})
     rows = A.rows_for(covs.cell)
     Z, _, codes, strata, _ = A.design(rows)
+    ref = A.ref_mask(rows)
     uidx = A.units.reset_index(drop=True)
     pos = {u: i for i, u in enumerate(uidx.unit)}
     Xu = A.U[rows][:, [pos[u] for u in units_sig]]
@@ -71,7 +72,7 @@ def run_gene_test(cfg, A, out):
     ch = int(g["chunk"])
     for s in range(0, len(genes), ch):
         Y = X[:, gkeep[s:s + ch]].toarray().astype(np.float64)
-        b, t, p = _fit(Xu, Y, Z)
+        b, t, p = _fit(Xu, Y, Z, ref)
         B[:, s:s + ch], T[:, s:s + ch], Pv[:, s:s + ch] = b, t, p
     F = np.vstack([benjamini_hochberg(Pv[i]) for i in range(len(units_sig))])
 
@@ -80,9 +81,15 @@ def run_gene_test(cfg, A, out):
     sub = np.sort(rng.choice(len(genes), min(1000, len(genes)), replace=False))
     Ysub = X[:, gkeep[sub]].toarray().astype(np.float64)
     null = []
+    ref_eng = RefEngine(Xu, Ysub, Z, ref) if ref is not None else None
     for _ in range(int(g["n_null"])):
-        pi = stratified_permutation(codes, rng)
-        null.append(float(np.mean(_fit(Xu[pi], Ysub, Z)[2] < 0.05)))
+        if ref_eng is None:
+            pi = stratified_permutation(codes, rng)
+            null.append(float(np.mean(_fit(Xu[pi], Ysub, Z)[2] < 0.05)))
+        else:                                   # labels shuffled per unit among its cells and the control cells
+            tb = ref_eng.stats(Xalt=ref_eng.permuted_X(codes, rng))[2]
+            pb = 2.0 * stats.t.sf(np.abs(tb), ref_eng.df)
+            null.append(float(np.nanmean(pb < 0.05)))
     cal = pd.DataFrame({"shuffle": range(len(null)), "frac_p_lt_0.05": null})
     cal.to_csv(os.path.join(out, "calibration.tsv"), sep="\t", index=False, float_format="%.4g")
     log(f"calibration: share of shuffled tests with p < 0.05 = {np.mean(null):.3f} "

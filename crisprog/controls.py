@@ -23,7 +23,7 @@ import os
 import numpy as np
 import pandas as pd
 
-from .model import OLSEngine, permutation_test
+from .model import make_engine, permutation_test
 from .utils import benjamini_hochberg, log
 
 
@@ -105,10 +105,12 @@ def run_control_check(A, rows, Y, Z, codes, prog_names, a, res, real_n1, out):
         f"cells ({', '.join(f'{k} {v}' for k, v in cu.type.value_counts().items())}); perturbed cells per control "
         f"unit: median {cu.n_perturbed.median():.0f}; control labels per unit: median {cu.n_guides.median():.0f}")
     sep = np.asarray(A.U[rows][np.asarray(A.Gc[rows].sum(axis=1)).ravel() > 0].sum(axis=1)).ravel()
-    if len(sep) and (sep == 0).all():
+    if A.is_ref is not None:
+        log("control check: each control unit is compared with the other control cells")
+    elif len(sep) and (sep == 0).all():
         log("control check: cells with control guides carry no targeting guide (controls are a separate population); "
             "control units are compared with the other control cells of the same MOI level")
-    eng = OLSEngine(Xc, Y, Z)
+    eng = make_engine(Xc, Y, Z, A.ref_mask(rows))
     beta, se, t, dd = eng.stats()
     with np.errstate(divide="ignore", invalid="ignore"):
         eff = beta / (se * np.sqrt(dd)[:, None])

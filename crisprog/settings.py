@@ -170,10 +170,22 @@ def suggest_and_explain(cfg, A, znames):
         if nctl_cols else ("Not added: control guides are only in cells without targeting guides, which the guide-count "
                            "columns already separate." if len(A.control_guides) and not shared else
                            "Not added: no control guides share cells with targeting guides."))
+    ref = a["reference"]
+    exp("Model", "association.reference", ref,
+        ("Each unit is compared with the control cells only (cells with control guides and no targeting guide): "
+         "it is fitted on its own cells (1) and the control cells (0); other perturbations never enter its comparison. "
+         "Guide-count covariates are left out, since they would separate control cells from every unit."
+         + (f" Control cells here: {int(A.is_ref.sum()):,}." if A.is_ref is not None else ""))
+        if ref == "controls" else
+        ("Each unit is compared with all other cells (its cells are 1, every other cell 0), which suits high-MOI "
+         "screens where each perturbation is a small share of cells. With one perturbation per cell and a few large "
+         "perturbations, 'controls' compares each unit with the control cells only."))
     exp("Model", "association", f"min_perturbed {a['min_perturbed']}, n_perm {a['n_perm']}, FDR {a['fdr']}",
         f"Units with fewer than {a['min_perturbed']} perturbed cells are not tested. P-values come from {a['n_perm']:,} "
-        "shuffles of guide labels among cells of the same guide count, depth bin and batch (pooled across similar units "
-        f"when more than 50 are tested); FDR within each program; hits are FDR < {a['fdr']}.")
+        + ("shuffles of each unit's labels among its own cells and the control cells of the same depth bin and batch"
+           if ref == "controls" else
+           "shuffles of guide labels among cells of the same guide count, depth bin and batch")
+        + f" (pooled across similar units when more than 50 are tested); FDR within each program; hits are FDR < {a['fdr']}.")
 
     # ---- programs ----
     exp("Programs", "programs.file", cfg["programs"]["file"],

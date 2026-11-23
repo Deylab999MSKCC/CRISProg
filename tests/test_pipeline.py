@@ -414,3 +414,131 @@ case "$*" in *FACTCHECK*) cat {tmp_path}/fixed.md ;; *) cat {tmp_path}/draft.md 
     fc = open(out / "factcheck.md").read()
     assert "`20/20`" in fc and "was: 20/20" in fc
     assert (out / "report.html").exists()
+
+
+# ---- association.reference: controls -------------------------------------------------------------------------
+def toy_low_moi(seed=0, n=900, E=6, P=3):
+    """One perturbation per cell: 30% control cells, the rest split over E units; 3 batches, one of which
+    has no control cells and holds all cells of the last unit (which then cannot be estimated)."""
+    rng = np.random.default_rng(seed)
+    lab = np.where(rng.random(n) < 0.3, -1, rng.integers(0, E - 1, n))     # -1 = control
+    batch = rng.integers(0, 2, n)
+    extra = rng.choice(np.flatnonzero(lab >= 0), 40, replace=False)        # unit E-1: alone in batch 2
+    lab[extra], batch[extra] = E - 1, 2
+    X = sp.csr_matrix((np.ones((lab >= 0).sum()), (np.flatnonzero(lab >= 0), lab[lab >= 0])), shape=(n, E))
+    Z = np.column_stack([np.ones(n), rng.normal(size=n), batch == 1, batch == 2]).astype(float)
+    Y = rng.normal(size=(n, P)) + 0.3 * Z[:, [1]] + 0.5 * (lab == 0)[:, None]   # unit 0 has an effect
+    return X, Y, Z, lab == -1
+
+
+def _subset_fit(x, Y, Z, rows):
+    D = np.column_stack([x[rows], Z[rows]])
+    D = D[:, np.abs(D).sum(axis=0) > 0]
+    out = []
+    for j in range(Y.shape[1]):
+        coef, *_ = np.linalg.lstsq(D, Y[rows, j], rcond=None)
+        r = Y[rows, j] - D @ coef
+        rank = np.linalg.matrix_rank(D)
+        cov = np.linalg.pinv(D.T @ D) * (r @ r) / (len(rows) - rank)
+        out.append((coef[0], np.sqrt(cov[0, 0])))
+    return np.array(out)
+
+
+def test_ref_engine_matches_subset_fit():
+    """reference: controls equals a separate OLS on each unit's cells + the control cells (absent batch levels
+    dropped); a unit confounded with a batch that has no control cells is NaN; a control unit is fitted against
+    the other control cells."""
+    from crisprog.model import RefEngine
+    X, Y, Z, ref = toy_low_moi()
+    beta, se, t, _ = RefEngine(X, Y, Z, ref).stats()
+    E = X.shape[1]
+    for u in range(E - 1):
+        x = X[:, u].toarray().ravel()
+        rows = np.flatnonzero(ref | (x > 0))
+        want = _subset_fit(x, Y, Z, rows)
+        assert np.allclose(beta[u], want[:, 0]) and np.allclose(se[u], want[:, 1])
+    assert np.isnan(t[E - 1]).all()
+    assert (np.abs(t[0]) > 3).all() and (np.abs(t[1:E - 1]) < 4).all()
+    rng = np.random.default_rng(3)
+    xc = np.zeros(len(ref))
+    xc[rng.choice(np.flatnonzero(ref), 60, replace=False)] = 1
+    bc, sc, *_ = RefEngine(sp.csr_matrix(xc[:, None]), Y, Z, ref).stats()
+    want = _subset_fit(xc, Y, Z, np.flatnonzero(ref))
+    assert np.allclose(bc[0], want[:, 0]) and np.allclose(sc[0], want[:, 1])
+
+
+def test_ref_permutations_stay_within_unit_and_controls():
+    """Shuffled labels of a unit only land on its own cells or control cells of the same stratum; the
+    block-wise null statistics equal refits on the shuffled labels; null p-values are calibrated."""
+    from crisprog.model import RefEngine
+    X, Y, Z, ref = toy_low_moi(seed=2, n=2000, E=12)
+    Y = np.random.default_rng(5).normal(size=Y.shape) + 0.3 * Z[:, [1]]      # all null
+    eng = RefEngine(X, Y, Z, ref)
+    codes = make_strata(depth=Z[:, 1], batch=Z[:, 2] + 2 * Z[:, 3], depth_bins=3)
+    Xp = eng.permuted_X(codes, np.random.default_rng(1))
+    for u in range(X.shape[1]):
+        new = Xp[:, u].toarray().ravel() > 0
+        old = X[:, u].toarray().ravel() > 0
+        assert new.sum() == old.sum() and (ref[new] | old[new]).all()
+        assert np.array_equal(np.bincount(codes[new], minlength=codes.max() + 1),
+                              np.bincount(codes[old], minlength=codes.max() + 1))
+    t_alt = eng.stats(Xalt=Xp)[2]
+    for u in range(X.shape[1] - 1):
+        x = Xp[:, u].toarray().ravel()
+        rows = np.flatnonzero(ref | (X[:, u].toarray().ravel() > 0))
+        want = _subset_fit(x, Y, Z, rows)
+        assert np.allclose(t_alt[u], want[:, 0] / want[:, 1])
+    _, _, t, _ = eng.stats()
+    p_own, p_pool, null_frac, _ = permutation_test(eng, t, codes, n_perm=300, pool_bins=2, seed=4)
+    ok = np.isfinite(t)
+    assert np.isnan(p_own[~ok]).all() and 0.0 < np.mean(p_own[ok] < 0.05) < 0.2
+    assert 0.02 < null_frac.mean() < 0.09
+
+
+@needs_r
+def test_reference_controls_vs_all(tmp_path, example_data):
+    """KO-village-like data: one perturbation per cell, a large unit (30% of cells) that raises PROG_A, null
+    units and control cells. reference: all compares each null unit with mostly BIG cells, so they look like
+    they lower PROG_A; reference: controls compares them with control cells only and keeps them null."""
+    import anndata
+    import yaml
+    from crisprog import cli
+    ad = anndata.read_h5ad(example_data / "example.h5ad")
+    rng = np.random.default_rng(0)
+    r = rng.random(ad.n_obs)
+    g = np.where(r < 0.25, [f"NTC_{k}" for k in rng.integers(1, 41, ad.n_obs)],
+                 np.where(r < 0.55, "BIG_g1", [f"NULL{k}_g1" for k in rng.integers(1, 9, ad.n_obs)]))
+    ad.obs["guides"] = g
+    big = g == "BIG_g1"
+    C = sp.csr_matrix(ad.layers["counts"]).astype(np.float64).tolil()
+    a_cols = [ad.var_names.get_loc(f"G{i:04d}") for i in range(1, 81)]
+    C[:, a_cols] = np.round((sp.diags(np.where(big, 1.6, 1.0)) @ C[:, a_cols]).toarray())
+    C = sp.csr_matrix(C)
+    X = sp.csr_matrix(C.multiply(1e4 / np.asarray(C.sum(1))))
+    X.data = np.log1p(X.data)
+    ad.X, ad.layers["counts"] = X.astype(np.float32), C.astype(np.float32)
+    ad.write_h5ad(tmp_path / "village.h5ad")
+    out = {}
+    for ref in ("all", "controls"):
+        cfgp = _config(tmp_path, example_data, file=str(example_data / "programs.gmt"))
+        c = yaml.safe_load(open(cfgp))
+        c["name"] = f"ref_{ref}"
+        c["data"].update(h5ad=str(tmp_path / "village.h5ad"), target_map=None)
+        c["aucell"]["n_repeats"] = 1
+        c["association"].update(n_perm=300, control_n_perm=200, reference=ref)
+        yaml.safe_dump(c, open(cfgp, "w"))
+        cli.main(["run", cfgp, "--steps", "check,score,test,genes"])
+        res = pd.read_csv(tmp_path / f"ref_{ref}" / "3_association" / "results.tsv", sep="\t")
+        info = __import__("json").load(open(tmp_path / f"ref_{ref}" / "3_association" / "run_info.json"))
+        assert info["reference"] == ref
+        out[ref] = res[res.program == "PROG_A"].set_index("unit")
+    nulls = [u for u in out["all"].index if u.startswith("NULL")]
+    for ref in ("all", "controls"):
+        assert out[ref].loc["BIG_g1", "fdr"] < 0.05 and out[ref].loc["BIG_g1", "t"] > 0
+    assert (out["all"].loc[nulls, "t"] < -2).mean() > 0.7                  # shifted baseline
+    assert (out["controls"].loc[nulls, "fdr"] < 0.05).sum() == 0            # vs controls: null
+    assert abs(out["controls"].loc[nulls, "t"].median()) < 1.5
+    rep = open(tmp_path / "ref_all" / "0_check" / "check_report.md").read()
+    assert "association.reference: controls" in rep                       # check suggests it for this design
+    gcal = pd.read_csv(tmp_path / "ref_controls" / "4_gene_test" / "calibration.tsv", sep="\t")
+    assert gcal["frac_p_lt_0.05"].between(0.01, 0.1).all()

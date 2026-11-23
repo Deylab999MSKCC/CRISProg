@@ -61,6 +61,19 @@ class Analysis:
             self.cov_names.append("n_control")
             log("covariate n_control (control guides per cell, as categories) added: control guides share cells with "
                 "targeting guides, so cells are compared at the same total number of detected guides")
+        self.reference = cfg["association"]["reference"]
+        self.is_ref = None
+        if self.reference == "controls":
+            ref = (moi_k == 0) & (nctl > 0)                  # control guides only: the 0s of every unit
+            if ref.sum() < 20:
+                raise SystemExit(f"association.reference: controls needs cells with control guides and no targeting "
+                                 f"guide; found {int(ref.sum())}")
+            self.is_ref = ref
+            gone = [c for c in ("moi", "n_control") if c in self.cov_names]
+            self.cov_names = [c for c in self.cov_names if c not in gone]
+            log(f"reference: each unit is compared with the {int(ref.sum()):,} control cells only"
+                + (f"; {', '.join(gone)} left out of the covariates (control cells have no targeting guide, so guide "
+                   "counts would separate them from every unit)" if gone else ""))
         self.batch_cols = list(cv["batch"])
         self.moi_categorical = cv["moi_categorical"]
 
@@ -87,6 +100,10 @@ class Analysis:
         if len(rows) < len(self.cells):
             log(f"{len(self.cells) - len(rows):,} cells have no score and are left out")
         return rows
+
+    def ref_mask(self, rows):
+        """Control (reference) cells among rows, or None when every other cell is the reference."""
+        return None if self.is_ref is None else self.is_ref[rows]
 
     def design(self, rows):
         """Covariate matrix, its column names and permutation strata for the cells in rows."""

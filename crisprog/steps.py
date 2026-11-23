@@ -9,7 +9,7 @@ from scipy import stats
 
 from .aucell import program_recovery, read_scores, run_aucell
 from .data import read_programs
-from .model import OLSEngine, permutation_test
+from .model import make_engine, permutation_test
 from .plots import volcano
 from .utils import benjamini_hochberg, log
 
@@ -118,7 +118,8 @@ def step_test(cfg, ctx):
     U = A.U[rows]
     Z, znames, codes, strata, builtin = A.design(rows)
     n = len(rows)
-    log(f"cells analyzed: {n:,}; design: {', '.join(znames)}; permutation strata: {strata}")
+    log(f"cells analyzed: {n:,}; design: {', '.join(znames)}; permutation strata: {strata}; reference: "
+        + ("all other cells" if A.is_ref is None else f"the {int(A.ref_mask(rows).sum()):,} control cells"))
 
     n1 = np.asarray(U.sum(axis=0)).ravel().astype(int)
     tested = (n1 >= a["min_perturbed"]) & (n1 <= n - a["min_perturbed"])
@@ -127,11 +128,15 @@ def step_test(cfg, ctx):
         f"programs: {len(prog_names)}")
     if not len(t_idx):
         raise SystemExit("no unit has enough perturbed cells")
-    eng = OLSEngine(U[:, t_idx], Y, Z)
+    eng = make_engine(U[:, t_idx], Y, Z, A.ref_mask(rows))
     beta, se, t, d = eng.stats()
     with np.errstate(divide="ignore", invalid="ignore"):
         effect_sd = beta / (se * np.sqrt(d)[:, None])
     p_ols = 2.0 * stats.t.sf(np.abs(t), eng.df)
+    bad = ~np.isfinite(t).any(axis=1)
+    if bad.any():
+        log(f"{int(bad.sum())} unit(s) cannot be estimated (their cells are explained by the covariates, e.g. "
+            f"all in batches without reference cells): {', '.join(A.units.unit.iloc[t_idx[bad]].astype(str)[:10])}")
     pooled = a["perm_p"] == "pooled" or (a["perm_p"] == "auto" and len(t_idx) > 50)
     log(f"{a['n_perm']:,} stratified shuffles; p_perm = "
         + ("pooled over tests with similar perturbed-cell counts" if pooled else "each test's own shuffles"))
@@ -183,6 +188,7 @@ def step_test(cfg, ctx):
     volcano(res, os.path.join(out, "volcano"), a["fdr"], program_sizes={p: len(prog_sets[p]) for p in prog_names})
     with open(os.path.join(out, "run_info.json"), "w") as fh:
         json.dump({"cells_analyzed": n, "units_tested": int(len(t_idx)), "design": znames, "strata": strata,
+                   "reference": A.reference,
                    "p_perm": "pooled" if pooled else "own", "minutes": round((time.time() - t0) / 60, 2)}, fh, indent=2)
     log("calibration (share of shuffled tests with OLS p < 0.05; ~0.05 = well calibrated):")
     print(cal[["program", "n_tested", "null_frac_p_ols_lt_0.05", f"hits_fdr_lt_{a['fdr']:g}"]]

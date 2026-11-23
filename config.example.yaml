@@ -74,6 +74,7 @@ association:
   fdr_scope: program
   fdr: 0.05
   seed: 1
+  reference: all          # all: every other cell is the 0 group | controls: control cells only (one perturbation per cell)
   control_units: auto
   control_unit_cells: null
   n_control_units: 100
