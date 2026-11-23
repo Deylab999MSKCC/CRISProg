@@ -113,8 +113,9 @@ def run_gene_test(cfg, A, out):
     partners = {u: sorted({unit_of[x] for x in lab_cis[u] - set(lab_own[u]) if x in unit_of} - {u})
                 for u in lab_own}
     gs = set(map(str, A.genes))                # target labels -> measured genes ('POU5F1_P2' -> POU5F1)
-    own = {u: list(dict.fromkeys(g for x in xs for g in target_genes(x, gs))) for u, xs in lab_own.items()}
-    targets = {u: {g for x in xs for g in target_genes(x, gs)} for u, xs in lab_cis.items()}
+    gm = getattr(A, "genes_of", None)          # target map gene column (labels that are not gene names)
+    own = {u: list(dict.fromkeys(g for x in xs for g in target_genes(x, gs, gm))) for u, xs in lab_own.items()}
+    targets = {u: {g for x in xs for g in target_genes(x, gs, gm)} for u, xs in lab_cis.items()}
 
     long = pd.DataFrame({
         "unit": np.repeat(units_sig, len(genes)), "gene": np.tile(genes, len(units_sig)),

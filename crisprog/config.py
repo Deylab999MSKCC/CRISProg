@@ -24,7 +24,7 @@ DEFAULTS = {
         "control_types": {},               # {type: regex} to split the negative controls, e.g.
                                            # {non-targeting: '^NC_non-targeting', safe-targeting: '^NC_OR'}
         "positive_controls": [],           # targets that are positive controls (knockdown controls, not TFs)
-        "target_map": None,                # TSV guide<TAB>target; null = every guide is tested on its own
+        "target_map": None,                # TSV guide<TAB>target[<TAB>target_id][<TAB>gene]; null = every guide is tested on its own
         "merge_identical_targets": True,
         "keep_cells_without_guides": False,
     },

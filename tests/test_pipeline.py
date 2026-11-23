@@ -208,6 +208,46 @@ def test_target_genes_resolves_suffixes():
     assert target_genes("NOTAGENE_P1", gs) == []
 
 
+def test_target_map_gene_column():
+    """The map's `gene` column names the genes of labels that are not gene names; other labels resolve as before."""
+    from crisprog.data import add_target_genes, gene_map, target_genes
+    tm = pd.DataFrame({"guide": ["a", "b", "c", "d"], "target": ["HNF4Ahet", "TET1/2/3", "SOX4_P1", "HNF4A"],
+                       "gene": ["HNF4A", "TET1;TET2;TET3", None, "HNF4A"]})
+    gm = gene_map(tm)
+    gs = {"HNF4A", "TET1", "TET2", "SOX4"}                      # TET3 not measured
+    assert gm["TET1/2/3"] == ["TET1", "TET2", "TET3"] and "SOX4_P1" not in gm
+    assert target_genes("HNF4Ahet", gs, gm) == ["HNF4A"] and target_genes("HNF4Ahet", gs) == []
+    assert target_genes("TET1/2/3", gs, gm) == ["TET1", "TET2"]
+    assert target_genes("SOX4_P1", gs, gm) == ["SOX4"]          # no gene given: suffix rules as before
+    units = pd.DataFrame({"unit": ["HNF4Ahet", "HNF4A"], "targets": ["HNF4Ahet", "HNF4A"]})
+    assert list(add_target_genes(units, sorted(gs), gm).target_genes) == ["HNF4A", "HNF4A"]
+
+
+@needs_r
+def test_target_map_gene_column_end_to_end(tmp_path, example_data):
+    """A unit labelled 'G0005het' with gene G0005 in the map keeps its name but gets the own-target checks."""
+    from crisprog import cli
+    tm = pd.read_csv(example_data / "guide_targets.tsv", sep="\t")
+    tm["gene"] = tm.target
+    tm["target"] = tm.target.replace({"G0005": "G0005het"})
+    tm.to_csv(tmp_path / "targets.tsv", sep="\t", index=False)
+    cfgp = _config(tmp_path, example_data, file=str(example_data / "programs.gmt"))
+    import yaml
+    c = yaml.safe_load(open(cfgp))
+    c["data"]["target_map"] = str(tmp_path / "targets.tsv")
+    c["aucell"]["n_repeats"] = 1
+    yaml.safe_dump(c, open(cfgp, "w"))
+    cli.main(["run", cfgp, "--to", "genes"])
+    res = pd.read_csv(tmp_path / "out" / "3_association" / "results.tsv", sep="\t")
+    a = res[(res.unit == "G0005het") & (res.program == "PROG_A")].iloc[0]
+    assert a.target_genes == "G0005" and bool(a.target_in_program)
+    summ = pd.read_csv(tmp_path / "out" / "4_gene_test" / "program_summary.tsv", sep="\t")
+    s = summ[(summ.unit == "G0005het") & (summ.program == "PROG_A")].iloc[0]
+    assert str(s.target_t).startswith("G0005:")
+    qc = pd.read_csv(tmp_path / "out" / "0_check" / "unit_qc.tsv", sep="\t")
+    assert qc.loc[qc.unit == "G0005het", "target_t"].notna().all()
+
+
 @needs_r
 def test_suffixed_target_names(tmp_path, example_data):
     """A unit named 'G0005_P2' is still recognised as targeting gene G0005 (in-program check, own-target t)."""

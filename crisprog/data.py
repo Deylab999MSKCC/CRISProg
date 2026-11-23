@@ -97,25 +97,43 @@ def parse_guides(values, sep=";", controls=(), control_pattern=None):
 def read_target_map(path):
     """TSV with columns `guide` and `target` (one row per pair; a guide may hit several targets), and optionally
     `target_id` (e.g. the Ensembl gene ID), which is passed to the results and the report so that ambiguous
-    symbols (aliases, renamed genes) are identifiable."""
+    symbols (aliases, renamed genes) are identifiable, and `gene`: the gene symbol(s) the target acts on
+    (';'-separated), for targets whose label is not a gene name, e.g. 'HNF4Ahet' -> HNF4A or 'TET1/2/3' ->
+    TET1;TET2;TET3. `gene` is used for the knockdown check, the target-in-program flag and the per-gene test; the
+    unit itself stays as named by `target`."""
     d = pd.read_csv(path, sep="\t", dtype=str)
     if not {"guide", "target"} <= set(d.columns):
         raise SystemExit(f"{path}: needs columns `guide` and `target` (found: {', '.join(d.columns)})")
     d = d.dropna(subset=["guide", "target"])
     d = d.assign(guide=d["guide"].str.strip(), target=d["target"].str.strip())
-    cols = ["guide", "target"] + (["target_id"] if "target_id" in d.columns else [])
+    cols = ["guide", "target"] + [c for c in ("target_id", "gene") if c in d.columns]
     return d[cols].drop_duplicates(["guide", "target"]).reset_index(drop=True)
+
+
+def gene_map(target_map):
+    """target label -> list of gene symbols from the target map's optional `gene` column ({} if absent)."""
+    if target_map is None or "gene" not in target_map.columns:
+        return {}
+    out = {}
+    for t, g in zip(target_map["target"], target_map["gene"].fillna("")):
+        for x in re.split(r"[;|,]", str(g)):
+            if x.strip() and x.strip() not in out.setdefault(t, []):
+                out[t].append(x.strip())
+    return {t: v for t, v in out.items() if v}
 
 
 TARGET_SUFFIX = re.compile(r"(_P\d+(?:P\d+)*|-P\d+(?:P\d+)*(?:-\d+)?|_main|_[BC]|_strong|_weak|_\d+|_[+-]_.*|#.*)$")
 
 
-def target_genes(label, gene_set):
+def target_genes(label, gene_set, genes_of=None):
     """Measured gene(s) a target label refers to.
 
-    The label itself if it is a measured gene; otherwise each '|'-separated part with promoter / TSS / guide
+    If the target map gave genes for this label (`genes_of`, from its `gene` column), those that are measured.
+    Otherwise the label itself if it is a measured gene, else each '|'-separated part with promoter / TSS / guide
     suffixes removed until it matches: 'POU5F1_P2' -> POU5F1, 'SOX4_P1P2' -> SOX4, 'AARS_main' -> AARS,
     'ZNF226_P1|ZNF234_P1' -> ZNF226, ZNF234. Labels with no measured gene give []."""
+    if genes_of and label in genes_of:
+        return [g for g in genes_of[label] if g in gene_set]
     if label in gene_set:
         return [label]
     out = []
@@ -131,19 +149,21 @@ def target_genes(label, gene_set):
     return out
 
 
-def add_target_genes(units, genes):
-    """units['target_genes']: the measured genes behind each unit's target labels (';'-joined)."""
+def add_target_genes(units, genes, genes_of=None):
+    """units['target_genes']: the measured genes behind each unit's target labels (';'-joined); `genes_of` =
+    gene_map(target_map) for labels that are not gene names."""
     gs = set(map(str, genes))
     tg, renamed, missing = [], [], []
     for t in units["targets"].fillna(""):
         labels = [x for x in str(t).split(";") if x]
-        g = list(dict.fromkeys(y for x in labels for y in target_genes(x, gs)))
+        g = list(dict.fromkeys(y for x in labels for y in target_genes(x, gs, genes_of)))
         tg.append(";".join(g))
-        renamed += [x for x in labels if x not in gs and target_genes(x, gs)]
-        missing += [x for x in labels if not target_genes(x, gs)]
+        renamed += [x for x in labels if target_genes(x, gs, genes_of) not in ([], [x])]
+        missing += [x for x in labels if not target_genes(x, gs, genes_of)]
     if renamed:
-        ex = ", ".join(f"{x} -> {'/'.join(target_genes(x, gs))}" for x in renamed[:5])
-        log(f"target names matched to measured genes after removing suffixes: {len(renamed):,} (e.g. {ex})")
+        ex = ", ".join(f"{x} -> {'/'.join(target_genes(x, gs, genes_of))}" for x in renamed[:5])
+        how = "the target map's gene column or suffix removal" if genes_of else "removing suffixes"
+        log(f"target names matched to measured genes via {how}: {len(renamed):,} (e.g. {ex})")
     if missing:
         log(f"target names with no measured gene (no own-target check for these): {len(missing):,} "
             f"(e.g. {', '.join(missing[:8])})")

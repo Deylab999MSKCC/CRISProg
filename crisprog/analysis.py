@@ -3,7 +3,7 @@ import re
 
 import numpy as np
 
-from .data import add_target_genes, build_units, load_h5ad, parse_guides, read_target_map
+from .data import add_target_genes, build_units, gene_map, load_h5ad, parse_guides, read_target_map
 from .model import DEPTH, build_design, make_strata
 from .utils import log
 
@@ -32,7 +32,10 @@ class Analysis:
         self.target_map = tmap
         self.U, self.units = build_units(G[keep], guides, tmap, merge_identical=d["merge_identical_targets"])
         self.cells, self.genes = cells[keep], genes
-        self.units = add_target_genes(self.units, genes)
+        self.genes_of = gene_map(tmap)              # target label -> genes, from the map's optional `gene` column
+        if self.genes_of:
+            log(f"target map: gene column gives the genes of {len(self.genes_of):,} targets")
+        self.units = add_target_genes(self.units, genes, self.genes_of)
         tid = {}
         if tmap is not None and "target_id" in tmap.columns:
             tid = tmap.dropna(subset=["target_id"]).drop_duplicates("target").set_index("target")["target_id"].to_dict()
